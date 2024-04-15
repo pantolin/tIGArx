@@ -1,1 +1,1 @@
-from tIGAr.common import *
+from tIGAr import common

@@ -9,17 +9,18 @@ is the PhD thesis of J.A. Evans:
 This demo uses NURBS to describe a distorted mesh.
 """
 
-from tIGAr.common import mpirank, worldcomm
-from tIGAr.NURBS import NURBSControlMesh
-from tIGAr.compatibleSplines import BSplineCompat, ExtractedBSplineRT
-from tIGAr.timeIntegration import GeneralizedAlphaIntegrator
+from tIGArx.common import mpirank, worldcomm
+from tIGArx.NURBS import NURBSControlMesh
+from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
+from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
 
 from igakit.nurbs import NURBS as NURBS_ik
 from igakit.io import PetIGA
 
-import dolfin
+import dolfinx
 import ufl
 
+from mpi4py import MPI
 import numpy as np
 
 ####### Geometry creation #######
@@ -36,7 +37,7 @@ vKnots = [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]
 
 # Array of control points, for a bi-unit square with the interior
 # parameterization distorted, magnified by a factor of pi:
-cpArray = np.math.pi * np.array(
+cpArray = np.pi * np.array(
     [
         [[-1.0, -1.0], [0.0, -1.0], [1.0, -1.0]],
         [[-1.0, 0.0], [0.7, 0.3], [1.0, 0.0]],
@@ -74,7 +75,7 @@ if mpirank == 0:
     print("Generating extraction data...")
 
 # Create a control mesh from the igakit NURBS object
-controlMesh = NURBSControlMesh("out.dat", useRect=True)
+controlMesh = NURBSControlMesh("out.dat")
 
 # The degrees of the unknown fields here are independent of the control mesh.
 # Note: For RT B-splines, "degree 1" includes some quadratic scalar fields (for
@@ -97,7 +98,8 @@ for field in range(0, 2):
 
 # Write extraction data to filesystem.
 DIR = "./extraction"
-splineGenerator.writeExtraction("./extraction")
+# FIXME
+# splineGenerator.writeExtraction("./extraction")
 
 
 ####### Analysis #######
@@ -108,7 +110,11 @@ if mpirank == 0:
 # Set up extracted spline.
 QUAD_DEG = 4
 spline = ExtractedBSplineRT(splineGenerator, QUAD_DEG)
-# spline = ExtractedBSplineRT("./extraction",QUAD_DEG)
+spline.cpFuncs[0].name = "FX"
+spline.cpFuncs[1].name = "FY"
+spline.cpFuncs[2].name = "FZ"
+spline.cpFuncs[3].name = "FW"
+# spline = ExtractedBSplineRT(DIR, QUAD_DEG)
 
 if mpirank == 0:
     print("Starting analysis...")
@@ -123,22 +129,22 @@ x = spline.spatialCoordinates()
 soln0 = ufl.sin(x[0]) * ufl.cos(x[1])
 soln1 = -ufl.cos(x[0]) * ufl.sin(x[1])
 # (Because igakit produces a 3D physical domain, physical velocities are 3D.)
-soln = ufl.as_vector([soln0, soln1, dolfin.Constant(0.0)])
+soln = ufl.as_vector([soln0, soln1, 0.0])
 
 # Gradient of the Taylor--Green initial condition
 gradSoln = spline.grad(soln)
 
 # Mass density and dynamic viscosity of the fluid:
-DENS = dolfin.Constant(1.0)
-VISC = dolfin.Constant(0.1)
+DENS = 1.0
+VISC = 0.1
 
 # The time dependency of the Taylor--Green unsteady solution:
-solnt = dolfin.Expression(
-    "exp(-2.0*VISC*t/DENS)", VISC=float(VISC), t=0.0, DENS=float(DENS), degree=1
-)
+# solnt = dolfinx.Expression(
+# "exp(-2.0*VISC*t/DENS)", VISC=float(VISC), t=0.0, DENS=float(DENS), degree=1
+# )
 
 # The unknown velocity solution in the parametric domain:
-u_hat = dolfin.Function(spline.V)
+u_hat = dolfinx.fem.Function(spline.V)
 
 # Note that spline.V contains velocity only, and no pressure.  The solution
 # algorithm will constrain the velocity to a solenoidal subspace.  The
@@ -151,8 +157,9 @@ u_old_hat = spline.divFreeProject(soln)
 udot_old_hat = spline.divFreeProject(-2.0 * VISC / DENS * soln)
 
 # Create a generalized-alpha time integrator for the velocity.
-RHO_INF = dolfin.Constant(0.5)
-timeInt = GeneralizedAlphaIntegrator(RHO_INF, DELTA_T, u_hat, (u_old_hat, udot_old_hat))
+RHO_INF = 0.5
+timeInt = GeneralizedAlphaIntegrator(
+    RHO_INF, DELTA_T, u_hat, (u_old_hat, udot_old_hat))
 
 # Get the alpha-level velocity and partial time derivative, pushed forward
 # to the physical domain (via the Piola transform).
@@ -166,7 +173,7 @@ def eps(u):
 
 
 # Test function for the velocity, in the parametric and physical domains:
-v_hat = dolfin.TestFunction(spline.V)
+v_hat = ufl.TestFunction(spline.V)
 v = spline.pushforward(v_hat)
 
 # Material time derivative of the velocity:
@@ -178,76 +185,74 @@ sigmaVisc = 2.0 * VISC * eps(u)
 # The problem is posed on a solenoidal subspace, as enforced by iterative
 # penalty solution algorithm.  No pressure terms are necessary in the
 # variational form.
-res = DENS * ufl.inner(Du_Dt, v) * spline.dx + ufl.inner(sigmaVisc, eps(v)) * spline.dx
+res = DENS * ufl.inner(Du_Dt, v) * spline.dx + \
+    ufl.inner(sigmaVisc, eps(v)) * spline.dx
 
 # Files for time series of the velocity and mesh distortion:
-u0File = dolfin.File("results/u-x.pvd")
-u1File = dolfin.File("results/u-y.pvd")
-# (Although this is a 2D problem, igakit produces a 3D control mesh.)
-F0File = dolfin.File("results/F-x.pvd")
-F1File = dolfin.File("results/F-y.pvd")
-F2File = dolfin.File("results/F-z.pvd")
-F3File = dolfin.File("results/F-w.pvd")
+vtk = dolfinx.io.VTKXWriter(spline.mesh.comm, "results/u.pvd", "w")
 
 # Time stepping loop:
 for i in range(0, N_STEPS):
 
     # Update the time variable in the time-dependent part of the exact
     # solution.
-    solnt.t = timeInt.t
+    # solnt.t = timeInt.t
 
     if mpirank == 0:
         print(
-            "------- Time step " + str(i + 1) + " , t = " + str(timeInt.t) + " -------"
+            "------- Time step " + str(i + 1) +
+            " , t = " + str(timeInt.t) + " -------"
         )
 
     # Use the iterated penalty solution algorithm to obtain a divergence-free
     # velocity field.
-    spline.iteratedDivFreeSolve(res, u_hat, v_hat, penalty=dolfin.Constant(1e6))
+    spline.iteratedDivFreeSolve(res, u_hat, v_hat, penalty=1.0e6)
 
     # For visualization, we want the physical components of velocity, but
     # these are not Function objects and cannot be written directly to
     # ParaView files.  Instead, project them onto a space of linears.
-    u0 = spline.projectScalarOntoLinears(u[0])
-    u1 = spline.projectScalarOntoLinears(u[1])
-    u0.rename("u0", "u0")
-    u1.rename("u1", "u1")
-    u0File << u0
-    u1File << u1
 
-    # Output the control mesh.
-    spline.cpFuncs[0].rename("F0", "F0")
-    spline.cpFuncs[1].rename("F1", "F1")
-    spline.cpFuncs[2].rename("F2", "F2")
-    spline.cpFuncs[3].rename("F3", "F3")
-    F0File << spline.cpFuncs[0]
-    F1File << spline.cpFuncs[1]
-    F2File << spline.cpFuncs[2]
-    F3File << spline.cpFuncs[3]
+    u0 = spline.projectScalarOntoControl(u[0])
+    u1 = spline.projectScalarOntoControl(u[1])
+    u0.name = "u0"
+    u1.name = "u1"
+    vtk.write_function([u0, u1] + spline.cpFuncs, t=float(i))
 
     # Advance to next time step.
     timeInt.advance()
 
+vtk.close()
 
-####### Postprocessing #######
+
+# ####### Postprocessing #######
 
 # Check the $L^2$ error at the final time.  Because the time step is kept
 # proportional to mesh size, and the time integrator is of second order, this
 # will converge at second order, even if higher-order splines are used in
 # space.
+
+# solnt = dolfinx.Expression(
+#     "exp(-2.0*VISC*t/DENS)", VISC=float(VISC), t=timeInt.t, DENS=float(DENS), degree=1
+# )
+t = timeInt.t
+solnt = dolfinx.fem.Constant(spline.mesh, np.exp(-2.0*VISC*t/DENS))
 errRes = spline.pushforward(timeInt.x) - solnt * soln
-L2Error = np.sqrt(dolfin.assemble(ufl.inner(errRes, errRes) * spline.dx))
+
+L2_error_local = dolfinx.fem.assemble_scalar(
+    dolfinx.fem.form(ufl.inner(errRes, errRes) * spline.dx))
+comm = spline.comm
+L2_error = np.sqrt(comm.allreduce(L2_error_local, op=MPI.SUM))
+
 if mpirank == 0:
-    print("L2 Error = " + str(L2Error))
+    print("L2 Error = " + str(L2_error))
 
 # Notes on ParaView plotting:
 #
-# Load all time series, then combine them with the Append Attributes filter.
-# Create a Calculator filter to define the displacement from the parametric
-# to physical domain:
+# Load the time series in the pvd file, then create a Calculator filter to
+# define the displacement from the parametric to physical domain:
 #
-#  (F0/F3 - coordsX)*iHat + (F1/F3 - coordsY)*jHat
+#  (FX/FW - coordsX)*iHat + (FY/FW - coordsY)*jHat
 #
 # Use this vector field to warp the mesh with the Warp by Vector filter.  The
-# velocity components may then be plotted as scalars, or turned into a vector
-# and/or otherwise processed using the Calculator filter.
+# velocity components u0 and u1 may then be plotted as scalars, or turned
+# into a vector and/or otherwise processed using the Calculator filter.

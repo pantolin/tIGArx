@@ -2,13 +2,13 @@
 The ``timeIntegration`` module
 ------------------------------
 is not strictly related to IGA, but contains routines for time integration
-methods commonly used in conjunction with IGA, that we found convenient for 
+methods commonly used in conjunction with IGA, that we found convenient for
 implementing demos.
 """
 
-from tIGAr.calculusUtils import getQuadRule
+from tIGArx.calculusUtils import getQuadRule
 
-import dolfin
+import dolfinx
 import ufl
 
 
@@ -38,34 +38,42 @@ class BackwardEulerIntegrator:
             self.xdot_old = oldFunctions[1]
         self.t = t + float(DELTA_T)  # DELTA_T may be a Constant already
 
+    def __xdot_impl(self, x, x_old):
+        """
+        Returns the approximation of the velocity at the current time step.
+        """
+        return (1.0 / self.DELTA_T) * x - (1.0 / self.DELTA_T) * x_old
+
     def xdot(self):
         """
         Returns the approximation of the velocity at the current time step.
         """
-        return (
-            dolfin.Constant(1.0 / self.DELTA_T) * self.x
-            - dolfin.Constant(1.0 / self.DELTA_T) * self.x_old
-        )
+        return self.__xdot_impl(self.x, self.xold)
+
+    def __xddot_impl(self, xdot, xdot_old):
+        """
+        Returns the approximation of the acceleration at the current time
+        step.
+        """
+        return (1.0 / self.DELTA_T) * xdot - (1.0 / self.DELTA_T) * xdot_old
 
     def xddot(self):
         """
         Returns the approximation of the acceleration at the current time
         step.
         """
-        return (
-            dolfin.Constant(1.0 / self.DELTA_T) * self.xdot()
-            - dolfin.Constant(1.0 / self.DELTA_T) * self.xdot_old
-        )
+        return self.__xddot_impl(self.xdot(), self.xdot_old)
 
     def advance(self):
         """
         Overwrites the data from the previous time step with the
         data from the current time step.
         """
-        x_old = dolfin.Function(self.x.function_space())
+        # FIXME
+        x_old = dolfinx.fem.Function(self.x.function_space())
         x_old.assign(self.x)
         if self.systemOrder == 2:
-            xdot_old = dolfin.Function(self.x.function_space())
+            xdot_old = dolfinx.fem.Function(self.x.function_space())
             xdot_old.assign(self.xdot())
         self.x_old.assign(x_old)
         if self.systemOrder == 2:
@@ -80,14 +88,15 @@ class LoadStepper:
     can be used to parameterize external loading.
     """
 
-    def __init__(self, DELTA_T, t=0.0):
+    def __init__(self, mesh, DELTA_T, t=0.0):
         """
         Initializes the ``LoadStepper`` with a (pseudo)time step ``DELTA_T``
         and initial time ``t``, which defaults to zero.
+        ``mesh`` is needed to initialize the time function.
         """
         self.DELTA_T = DELTA_T
         self.tval = t
-        self.t = dolfin.Expression("t", t=self.tval, degree=0)
+        self.t = dolfinx.fem.Constant(mesh, t)
         self.advance()
 
     def advance(self):
@@ -95,7 +104,7 @@ class LoadStepper:
         Increments the loading.
         """
         self.tval += float(self.DELTA_T)
-        self.t.t = self.tval
+        self.t.value = self.tval
 
 
 def x_alpha(alpha, x, x_old):
@@ -103,7 +112,7 @@ def x_alpha(alpha, x, x_old):
     Returns an ``alpha``-level quantity, given current and old values,
     i.e., ``Constant(alpha)*x + Constant(1.0-alpha)*x_old``.
     """
-    return dolfin.Constant(alpha) * x + dolfin.Constant(1.0 - alpha) * x_old
+    return alpha * x + (1.0 - alpha) * x_old
 
 
 class GeneralizedAlphaIntegrator:
@@ -162,6 +171,25 @@ class GeneralizedAlphaIntegrator:
             self.xddot_old = oldFunctions[2]
         self.t = t + float(DELTA_T)  # DELTA_T may be a Constant already
 
+    def __xdot_impl(self, x, x_old, xdot_old, xddot_old=None):
+        """
+        Returns the current time derivative of the solution at the ``n+1``
+        level, as a linear combination of the current solution and
+        data from the previous time step.
+        """
+        if self.systemOrder == 1:
+            return ((1.0 / (self.GAMMA * self.DELTA_T)) * x
+                    + (-1.0 / (self.GAMMA * self.DELTA_T)) * x_old
+                    + ((self.GAMMA - 1.0) / self.GAMMA) * xdot_old
+                    )
+        else:
+            return ((self.GAMMA / (self.BETA * self.DELTA_T)) * x
+                    + (-self.GAMMA / (self.BETA * self.DELTA_T)) * x_old
+                    + (1.0 - self.GAMMA / self.BETA) * xdot_old
+                    + ((1.0 - self.GAMMA) * self.DELTA_T
+                    - (1.0 - 2.0 * self.BETA) * self.DELTA_T * self.GAMMA / (2.0 * self.BETA)) * xddot_old
+                    )
+
     def xdot(self):
         """
         Returns the current time derivative of the solution at the ``n+1``
@@ -169,25 +197,22 @@ class GeneralizedAlphaIntegrator:
         data from the previous time step.
         """
         if self.systemOrder == 1:
-            return (
-                dolfin.Constant(1.0 / (self.GAMMA * self.DELTA_T)) * self.x
-                + dolfin.Constant(-1.0 / (self.GAMMA * self.DELTA_T)) * self.x_old
-                + dolfin.Constant((self.GAMMA - 1.0) / self.GAMMA) * self.xdot_old
-            )
+            return self.__xdot_impl(self.x, self.x_old, self.xdot_old)
         else:
-            return (
-                dolfin.Constant(self.GAMMA / (self.BETA * self.DELTA_T)) * self.x
-                + dolfin.Constant(-self.GAMMA / (self.BETA * self.DELTA_T)) * self.x_old
-                + dolfin.Constant(1.0 - self.GAMMA / self.BETA) * self.xdot_old
-                + dolfin.Constant(
-                    (1.0 - self.GAMMA) * self.DELTA_T
-                    - (1.0 - 2.0 * self.BETA)
-                    * self.DELTA_T
-                    * self.GAMMA
-                    / (2.0 * self.BETA)
-                )
-                * self.xddot_old
-            )
+            return self.__xdot_impl(self.x, self.x_old, self.xdot_old, self.xddot_old)
+
+    def __xddot_impl(self, xdot, xdot_old, xddot_old):
+        """
+        Returns the current 2nd time derivative of the solution at the ``n+1``
+        level, as a linear combination of the current solution and
+        data from the previous time step.
+        """
+        # should never be used for first-order systems
+        return (
+            (1.0 / self.DELTA_T / self.GAMMA) * xdot
+            + (-1.0 / self.DELTA_T / self.GAMMA) * xdot_old
+            + (-(1.0 - self.GAMMA) / self.GAMMA) * xddot_old
+        )
 
     def xddot(self):
         """
@@ -196,11 +221,7 @@ class GeneralizedAlphaIntegrator:
         data from the previous time step.
         """
         # should never be used for first-order systems
-        return (
-            dolfin.Constant(1.0 / self.DELTA_T / self.GAMMA) * self.xdot()
-            + dolfin.Constant(-1.0 / self.DELTA_T / self.GAMMA) * self.xdot_old
-            + dolfin.Constant(-(1.0 - self.GAMMA) / self.GAMMA) * self.xddot_old
-        )
+        return self.__xddot_impl(self.xdot(), self.xdot_old, self.xddot_old)
 
     def x_alpha(self):
         """
@@ -237,16 +258,9 @@ class GeneralizedAlphaIntegrator:
             return self.x_old
         return (
             self.x_old
-            + dolfin.Constant(self.DELTA_T) * self.xdot_old
-            + dolfin.Constant(
-                0.5
-                * (self.DELTA_T**2)
-                * (
-                    (1.0 - 2.0 * self.BETA)
-                    + 2.0 * self.BETA * (self.GAMMA - 1.0) / self.GAMMA
-                )
-            )
-            * self.xddot_old
+            + (self.DELTA_T) * self.xdot_old
+            + (0.5 * (self.DELTA_T**2) * ((1.0 - 2.0 * self.BETA) + 2.0 *
+               self.BETA * (self.GAMMA - 1.0) / self.GAMMA)) * self.xddot_old
         )
 
     # TODO: Implement same-acceleration predictor
@@ -256,20 +270,28 @@ class GeneralizedAlphaIntegrator:
         Overwrites the data from the previous time step with the
         data from the current time step.
         """
-        # must make copies first, to avoid using updated values in
-        # self.xdot(), etc., then assign self.xdot, etc., to re-assigned
-        # copies
-        x_old = dolfin.Function(self.x.function_space())
-        xdot_old = dolfin.Function(self.x.function_space())
-        x_old.assign(self.x)
-        xdot_old.assign(self.xdot())
-        if self.systemOrder == 2:
-            xddot_old = dolfin.Function(self.x.function_space())
-            xddot_old.assign(self.xddot())
-        self.x_old.assign(x_old)
-        self.xdot_old.assign(xdot_old)
-        if self.systemOrder == 2:
-            self.xddot_old.assign(xddot_old)
+
+        # Note: assign method in Function no longer exists in dolfinx
+        # so, this is done a little bit more manually.
+
+        x = self.x.x.array
+        x_old = self.x_old.x.array
+        xdot_old = self.xdot_old.x.array
+
+        if self.systemOrder == 1:
+            xdot = self.__xdot_impl(x, x_old, xdot_old)
+        else:
+            xddot_old = self.xddot_old.x.array
+            xdot = self.__xdot_impl(x, x_old, xdot_old, xddot_old)
+            xddot_old[:] = self.__xddot_impl(xdot, xdot_old, xddot_old)
+            self.xddot_old.x.scatter_forward()
+
+        xdot_old[:] = xdot
+        x_old[:] = x
+
+        self.xdot_old.x.scatter_forward()
+        self.x_old.x.scatter_forward()
+
         self.t += float(self.DELTA_T)
 
 

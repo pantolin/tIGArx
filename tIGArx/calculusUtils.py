@@ -3,7 +3,7 @@ The ``calculusUtils`` module
 ----------------------------
 contains functions and classes to hide the raw UFL involved in referring PDEs
 back to the IGA parametric domain.  Note that most functionality in this 
-module can also be used in non-tIGAr FEniCS applications.  
+module can also be used in non-tIGArx FEniCS applications.  
 """
 
 # Note that these functions simply help prepare a UFL specification of the
@@ -11,7 +11,7 @@ module can also be used in non-tIGAr FEniCS applications.
 # inside some inner loop over quadrature points, and should therefore be
 # optimized for generality/readability rather than speed of execution.
 
-import dolfin
+import dolfinx
 import ufl
 from ufl.classes import PermutationSymbol
 
@@ -137,8 +137,8 @@ class CurvilinearTensor:
         else:
             mat = self.g
         retval = ufl.as_tensor(
-            self.T[ii[0:i] + (ii[i],) + ii[i + 1 : n]] * mat[ii[i], ii[n]],
-            ii[0:i] + (ii[n],) + ii[i + 1 : n],
+            self.T[ii[0:i] + (ii[i],) + ii[i + 1: n]] * mat[ii[i], ii[n]],
+            ii[0:i] + (ii[n],) + ii[i + 1: n],
         )
         return CurvilinearTensor(
             retval,
@@ -147,7 +147,7 @@ class CurvilinearTensor:
             + [
                 not self.lowered[i],
             ]
-            + self.lowered[i + 1 :],
+            + self.lowered[i + 1:],
         )
 
     def raiseIndex(self, i):
@@ -222,15 +222,15 @@ def covariantDerivative(T):
         # use ii[n+1] as dummy index
         if T.lowered[i]:
             retval -= ufl.as_tensor(
-                T.T[ii[0:i] + (ii[n + 1],) + ii[i + 1 : n]]
+                T.T[ii[0:i] + (ii[n + 1],) + ii[i + 1: n]]
                 * gamma[(ii[n + 1], ii[i], ii[n])],
-                ii[0 : n + 1],
+                ii[0: n + 1],
             )
         else:
             retval += ufl.as_tensor(
-                T.T[ii[0:i] + (ii[n + 1],) + ii[i + 1 : n]]
+                T.T[ii[0:i] + (ii[n + 1],) + ii[i + 1: n]]
                 * gamma[(ii[i], ii[n + 1], ii[n])],
-                ii[0 : n + 1],
+                ii[0: n + 1],
             )
     newLowered = T.lowered + [
         True,
@@ -250,7 +250,7 @@ def curvilinearGrad(T):
     invg = ufl.inv(g)
     # raise last index
     retval = ufl.as_tensor(
-        deriv.T[ii[0 : n + 1]] * invg[ii[n : n + 2]], ii[0:n] + (ii[n + 1],)
+        deriv.T[ii[0: n + 1]] * invg[ii[n: n + 2]], ii[0:n] + (ii[n + 1],)
     )
     return CurvilinearTensor(
         retval,
@@ -282,8 +282,8 @@ def curvilinearDiv(T):
         print("ERROR: Divergence operator requires at least one raised index.")
         exit()
     deriv = covariantDerivative(T)
-    retval = ufl.as_tensor(deriv.T[ii[0:n] + (ii[j],)], ii[0:j] + ii[j + 1 : n])
-    return CurvilinearTensor(retval, g, T.lowered[0:j] + T.lowered[j + 1 : n])
+    retval = ufl.as_tensor(deriv.T[ii[0:n] + (ii[j],)], ii[0:j] + ii[j + 1: n])
+    return CurvilinearTensor(retval, g, T.lowered[0:j] + T.lowered[j + 1: n])
 
 
 # Cartesian differential operators in deformed configuration
@@ -312,7 +312,7 @@ def cartesianDiv(f, F):
     """
     n = ufl.rank(f)
     ii = ufl.indices(n)
-    return ufl.as_tensor(cartesianGrad(f, F)[ii + (ii[n - 1],)], ii[0 : n - 1])
+    return ufl.as_tensor(cartesianGrad(f, F)[ii + (ii[n - 1],)], ii[0: n - 1])
 
 
 def cartesianCurl(f, F):
@@ -393,7 +393,7 @@ def cartesianPushforwardW(phi, F):
 # TODO: rename this to ScaledMeasure
 # I can't just scale a measure by a Jacobian, so I'll store them separately,
 # then overload __rmul__()
-class tIGArMeasure:
+class tIGArxMeasure:
     """
     A UFL object multiplied by a measure produces a ``Form``, which cannot
     then be used conveniently, like a weighted measure.  This class is a
@@ -405,7 +405,7 @@ class tIGArMeasure:
     """
 
     # if quadDeg==None, then this works if meas is a FEniCS measure, OR if
-    # meas is another tIGAr measure; it's a good idea to set quadDeg
+    # meas is another tIGArx measure; it's a good idea to set quadDeg
     # if meas is a FEniCS measure, though, since the convoluted expressions
     # for rational splines tend to drive up the automatically-determined
     # quadrature degree
@@ -444,7 +444,7 @@ class tIGArMeasure:
         syntax that one would use to change ``subdomain_data`` of an
         ordinary measure.
         """
-        return tIGArMeasure(self.J, self.meas(marker))
+        return tIGArxMeasure(self.J, self.meas(marker))
 
     def __rmul__(self, other):
         """
@@ -465,45 +465,23 @@ def getQuadRule(n):
     levels.
     """
     if n == 1:
-        xi = [
-            dolfin.Constant(0.0),
-        ]
-        w = [
-            dolfin.Constant(2.0),
-        ]
+        xi = [0.0]
+        w = [2.0]
         return (xi, w)
     if n == 2:
-        xi = [
-            dolfin.Constant(-0.5773502691896257645091488),
-            dolfin.Constant(0.5773502691896257645091488),
-        ]
-        w = [dolfin.Constant(1.0), dolfin.Constant(1.0)]
+        xi = [-0.5773502691896257645091488, 0.5773502691896257645091488]
+        w = [1.0, 1.0]
         return (xi, w)
     if n == 3:
-        xi = [
-            dolfin.Constant(-0.77459666924148337703585308),
-            dolfin.Constant(0.0),
-            dolfin.Constant(0.77459666924148337703585308),
-        ]
-        w = [
-            dolfin.Constant(0.55555555555555555555555556),
-            dolfin.Constant(0.88888888888888888888888889),
-            dolfin.Constant(0.55555555555555555555555556),
-        ]
+        xi = [-0.77459666924148337703585308, 0.0, 0.77459666924148337703585308]
+        w = [0.55555555555555555555555556,
+             0.88888888888888888888888889, 0.55555555555555555555555556]
         return (xi, w)
     if n == 4:
-        xi = [
-            dolfin.Constant(-0.86113631159405257524),
-            dolfin.Constant(-0.33998104358485626481),
-            dolfin.Constant(0.33998104358485626481),
-            dolfin.Constant(0.86113631159405257524),
-        ]
-        w = [
-            dolfin.Constant(0.34785484513745385736),
-            dolfin.Constant(0.65214515486254614264),
-            dolfin.Constant(0.65214515486254614264),
-            dolfin.Constant(0.34785484513745385736),
-        ]
+        xi = [-0.86113631159405257524, -0.33998104358485626481,
+              0.33998104358485626481, 0.86113631159405257524]
+        w = [0.34785484513745385736, 0.65214515486254614264,
+             0.65214515486254614264, 0.34785484513745385736]
         return (xi, w)
 
     # TODO: add more quadrature rules (or, try to find a function in scipy or

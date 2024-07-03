@@ -1,16 +1,17 @@
 """
-The linear algebra operations in tIGAr only directly support homogeneous (zero)
+The linear algebra operations in tIGArx only directly support homogeneous (zero)
 Dirichlet boundary conditions (BCs), but this is sufficient to implement
 inhomogeneous (nonzero) BCs relatively easily. This demo modifies the basic
 Poisson equation example to enforce inhomogeneous Dirichlet BCs.
 """
 
-from tIGAr.common import mpirank, EqualOrderSpline, ExtractedSpline
-from tIGAr.BSplines import ExplicitBSplineControlMesh, uniformKnots
+from tIGArx.common import mpirank, EqualOrderSpline, ExtractedSpline
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
 
-import dolfin
+import dolfinx
 import ufl
 
+from mpi4py import MPI
 import numpy as np
 
 # Number of levels of refinement with which to run the Poisson problem:
@@ -43,7 +44,8 @@ for level in range(0, N_LEVELS):
 
     # Create a control mesh for which $\Omega = \widehat{\Omega}$.
     splineMesh = ExplicitBSplineControlMesh(
-        [p, q], [uniformKnots(p, x0, x0 + Lx, NELu), uniformKnots(q, y0, y0 + Ly, NELv)]
+        [p, q], [uniformKnots(p, x0, x0 + Lx, NELu),
+                 uniformKnots(q, y0, y0 + Ly, NELv)]
     )
 
     # Create a spline generator for a spline with a single scalar field on the
@@ -77,7 +79,8 @@ for level in range(0, N_LEVELS):
     # Create a force, f, to manufacture the exact solution; notice that
     # the exact solution is nonzero on the boundary.
     x = spline.spatialCoordinates()
-    soln = ufl.cos(ufl.pi * (x[0] - x0) / Lx) * ufl.cos(ufl.pi * (x[1] - y0) / Ly)
+    soln = ufl.cos(ufl.pi * (x[0] - x0) / Lx) * \
+        ufl.cos(ufl.pi * (x[1] - y0) / Ly)
     f = -spline.div(spline.grad(soln))
 
     # The simplest way to apply nonzero boundary conditions is by using
@@ -94,6 +97,7 @@ for level in range(0, N_LEVELS):
     # is much faster and accurate enough (2nd-order) for most applications.
     lumpMass = False
     u = spline.project(soln, rationalize=False, lumpMass=lumpMass)
+    u.name = "u"
 
     # Note that we want to use the spline's projection method rather than
     # direclty setting nodal values in the finite element respresentation of
@@ -103,9 +107,10 @@ for level in range(0, N_LEVELS):
     # nonlinear problem. This will converge in a single iteration, due to
     # the linearity of the problem. The zero BC set earlier will be enforced
     # by default on each increment of the nonlinear solve.
-    v = dolfin.TestFunction(spline.V)
-    residual = (ufl.inner(spline.grad(u), spline.grad(v)) - ufl.inner(f, v)) * spline.dx
-    jacobian = dolfin.derivative(residual, u)
+    v = ufl.TestFunction(spline.V)
+    residual = (ufl.inner(spline.grad(u), spline.grad(v)) -
+                ufl.inner(f, v)) * spline.dx
+    jacobian = ufl.derivative(residual, u)
     spline.solveNonlinearVariationalProblem(residual, jacobian, u)
 
     # A mathematically-equivalent trick for linear problems of the form
@@ -122,10 +127,15 @@ for level in range(0, N_LEVELS):
 
     # The solution, u, is in the homogeneous representation, but, again, for
     # B-splines with weight=1, this is the same as the physical representation.
-    dolfin.File("results/u.pvd") << u
+    with dolfinx.io.VTXWriter(spline.mesh.comm, "results/u.bp", [u]) as vtx:
+        vtx.write(0.0)
 
     # Compute and print the $L^2$ error in the discrete solution.
-    L2_error = np.sqrt(dolfin.assemble(((u - soln) ** 2) * spline.dx))
+
+    L2_error_local = dolfinx.fem.assemble_scalar(
+        dolfinx.fem.form(((u - soln) ** 2) * spline.dx))
+    comm = spline.comm
+    L2_error = np.sqrt(comm.allreduce(L2_error_local, op=MPI.SUM))
     L2_errors[level] = L2_error
     if level > 0:
         rate = np.log(L2_errors[level - 1] / L2_errors[level]) / np.log(2.0)

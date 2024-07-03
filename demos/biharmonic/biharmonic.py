@@ -6,12 +6,13 @@ This example uses the simplest IGA discretization, namely, explicit B-splines
 in which parametric and physical space are the same.
 """
 
-from tIGAr.common import EqualOrderSpline, ExtractedSpline, mpirank
-from tIGAr.BSplines import ExplicitBSplineControlMesh, uniformKnots
+from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
 
-import dolfin
+import dolfinx
 import ufl
 
+from mpi4py import MPI
 import numpy as np
 
 # Number of levels of refinement with which to run the Poisson problem.
@@ -48,7 +49,8 @@ for level in range(0, N_LEVELS):
 
     # Create a control mesh for which $\Omega = \widehat{\Omega}$.
     splineMesh = ExplicitBSplineControlMesh(
-        [p, q], [uniformKnots(p, -1.0, 1.0, NELu), uniformKnots(q, -1.0, 1.0, NELv)]
+        [p, q], [uniformKnots(p, -1.0, 1.0, NELu),
+                 uniformKnots(q, -1.0, 1.0, NELv)]
     )
 
     # Create a spline generator for a spline with a single scalar field on the
@@ -74,7 +76,8 @@ for level in range(0, N_LEVELS):
 
     # Write extraction data to the filesystem.
     DIR = "./extraction"
-    splineGenerator.writeExtraction(DIR)
+    # FIXME
+    # splineGenerator.writeExtraction(DIR)
 
     ####### Analysis #######
 
@@ -100,10 +103,10 @@ for level in range(0, N_LEVELS):
     # Homogeneous coordinate representation of the trial function u.  Because
     # weights are 1 in the B-spline case, this can be used directly in the PDE,
     # without dividing through by weight.
-    u = dolfin.TrialFunction(spline.V)
+    u = ufl.TrialFunction(spline.V)
 
     # Corresponding test function.
-    v = dolfin.TestFunction(spline.V)
+    v = ufl.TestFunction(spline.V)
 
     # Laplace operator, using spline's div and grad operations
     def lap(x):
@@ -116,24 +119,31 @@ for level in range(0, N_LEVELS):
 
     # Set up and solve the biharmonic problem
     res = ufl.inner(lap(u), lap(v)) * spline.dx - ufl.inner(f, v) * spline.dx
-    u = dolfin.Function(spline.V)
+    u = dolfinx.fem.Function(spline.V)
+    u.name = "u"
     spline.solveLinearVariationalProblem(res, u)
 
     ####### Postprocessing #######
 
     # The solution, u, is in the homogeneous representation, but, again, for
     # B-splines with weight=1, this is the same as the physical representation.
-    dolfin.File("results/u.pvd") << u
+    with dolfinx.io.VTXWriter(spline.mesh.comm, "results/u.bp", [u]) as vtx:
+        vtx.write(0.0)
 
     # Compute and print the error in the discrete solution.
     # L2_error = np.sqrt(assemble(((u-soln)**2)*spline.dx))
-    energyError = np.sqrt(dolfin.assemble((lap(u - soln) ** 2) * spline.dx))
+
+    energyError_local = dolfinx.fem.assemble_scalar(
+        dolfinx.fem.form(lap(u - soln) ** 2 * spline.dx))
+    comm = spline.comm
+    energyError = np.sqrt(comm.allreduce(energyError_local, op=MPI.SUM))
 
     # L2_errors[level] = L2_error
     energyErrors[level] = energyError
     if level > 0:
         # rate = np.log(L2_errors[level-1]/L2_errors[level])/np.log(2.0)
-        rate = np.log(energyErrors[level - 1] / energyErrors[level]) / np.log(2.0)
+        rate = np.log(energyErrors[level - 1] /
+                      energyErrors[level]) / np.log(2.0)
     else:
         rate = "--"
     if mpirank == 0:

@@ -1,41 +1,46 @@
 """
-This example considers a simplified variant of the problem from 
+This example considers a simplified variant of the problem from
 Section 4.4.3 of the paper
 
   https://web.me.iastate.edu/jmchsu/files/Kamensky_et_al-2017-CMAME.pdf
 
-in which a nonlocal contact formulation---arguably a form of peridynamics---is 
-used to penalize interpenetration of shell structures.  The required 
-shell structure geometry, in the format of a Rhino T-spline (although it 
+in which a nonlocal contact formulation---arguably a form of peridynamics---is
+used to penalize interpenetration of shell structures.  The required
+shell structure geometry, in the format of a Rhino T-spline (although it
 is in fact only two B-spline patches) is available (compressed) here:
 
   https://www.dropbox.com/s/irdhyral91mmock/knot.iga.tgz?dl=1
 
-(Credit to Fei Xu for designing this geometry, using the Rhino 3D CAD 
+(Credit to Fei Xu for designing this geometry, using the Rhino 3D CAD
 software.)  While the contact formulation is largely orthogonal to IGA, and
-can be reused mutatis mutandis for FE analysis, this demo illustrates 
-the robustness of the K--L shell formulation using $C^1$ displacements.  
+can be reused mutatis mutandis for FE analysis, this demo illustrates
+the robustness of the K--L shell formulation using $C^1$ displacements.
 
 For simplicity, we have omitted the singular kernel, adaptive time stepping,
-and specialized nonlinear solver of the cited reference, and just empirically 
-selected a sufficiently-large penalty and sufficiently-small time step for the 
+and specialized nonlinear solver of the cited reference, and just empirically
+selected a sufficiently-large penalty and sufficiently-small time step for the
 simulation to reach a steady state without structural self-intersection or
 divergence of the basic Newton iteration.  However, due to the choice of this
-naive nonlinear solver and "worst-case" uniform time step, the simulation 
-takes several hours on a modern workstation to reach an interesting 
-configuration.  
+naive nonlinear solver and "worst-case" uniform time step, the simulation
+takes several hours on a modern workstation to reach an interesting
+configuration.
 
 The implementation here relies on a number of seemingly-fragile assumptions
 regarding the ordering of DoFs in mixed function spaces, as pointed out in
-the comments; we invite any suggestions for more robust indexing schemes.  
+the comments; we invite any suggestions for more robust indexing schemes.
 """
 
-from tIGAr.common import EqualOrderSpline, ExtractedSpline, mpirank, mpisize
-from tIGAr.RhinoTSplines import RhinoTSplineControlMesh
 
-import dolfin
+from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank, mpisize
+from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
+
+import dolfinx
 import ufl
 from petsc4py import PETSc
+
+import scipy as sp
+import numpy as np
+import os.path
 
 if mpisize > 1:
     print("ERROR: This demo only works in serial.")
@@ -43,7 +48,6 @@ if mpisize > 1:
 
 # Check for existence of the required data file.
 FNAME = "knot.iga"
-import os.path
 
 if not os.path.isfile(FNAME):
     if mpirank == 0:
@@ -55,11 +59,6 @@ if not os.path.isfile(FNAME):
         )
     exit()
 
-from numpy import zeros
-from scipy.spatial import cKDTree
-from numpy.linalg import norm as npNorm
-from numpy import outer as npOuter
-from numpy import identity as npIdentity
 
 ADD_MODE = PETSc.InsertMode.ADD
 
@@ -82,27 +81,27 @@ splineGenerator = EqualOrderSpline(d, controlMesh)
 
 # Fix the left ends of the ribbons.  (Forces will be applied to the right
 # ends, in the variational formulation below.)
-class BdryDomain(dolfin.SubDomain):
-    def inside(self, x, on_boundary):
-        return x[0] < -6.0
+
+def get_left_end(x, on_boundary):
+    return x[0] < -6.0
 
 
 for i in range(0, d):
-    splineGenerator.addZeroDofsByLocation(BdryDomain(), i)
+    splineGenerator.addZeroDofsByLocation(get_left_end, i)
 
 
 # Fix only the y- and z- components of displacement for the right ends.
-class BdryDomain(dolfin.SubDomain):
-    def inside(self, x, on_boundary):
-        return x[0] > 10.0
+def get_right_end(x, on_boundary):
+    return x[0] > 10.0
 
 
 for i in range(1, d):
-    splineGenerator.addZeroDofsByLocation(BdryDomain(), i)
+    splineGenerator.addZeroDofsByLocation(get_right_end, i)
 
 # Write the extraction data.
 DIR = "./extraction"
-splineGenerator.writeExtraction(DIR)
+# FIXME
+# splineGenerator.writeExtraction(DIR)
 
 
 ####### Analysis #######
@@ -113,6 +112,10 @@ if mpirank == 0:
 # Read an extracted spline back in.
 QUAD_DEG = 6
 spline = ExtractedSpline(splineGenerator, QUAD_DEG)
+spline.cpFuncs[0].name = "FX"
+spline.cpFuncs[1].name = "FY"
+spline.cpFuncs[2].name = "FZ"
+spline.cpFuncs[3].name = "FW"
 
 if mpirank == 0:
     print("Starting analysis...")
@@ -127,12 +130,13 @@ def nodeToDof(node, direction):
 # Potentially-fragile assumption: that there is a correspondence in DoF order
 # between the scalar space used for each component of the control mapping and
 # the mixed space used for the displacement.
-nNodes = spline.cpFuncs[0].vector().get_local().size
-nodeX = zeros((nNodes, d))
+nNodes = spline.cpFuncs[0].vector.local_size
+nodeX = np.zeros((nNodes, d))
+# FIXME to vectorize
 for i in range(0, nNodes):
-    wi = spline.cpFuncs[d].vector().get_local()[i]
+    wi = spline.cpFuncs[d].vector.array_r[i]
     for j in range(0, d):
-        Xj_hom = spline.cpFuncs[j].vector().get_local()[i]
+        Xj_hom = spline.cpFuncs[j].vector.array_r[i]
         nodeX[i, j] = Xj_hom / wi
 
 # The contact potential is NOT defined in UFL; contact forces will be computed
@@ -160,13 +164,17 @@ def phiDoublePrime(r):
 
 # Using quadrature points coincident with the FE nodes of the extracted
 # representation of the spline significantly simplifies the assembly process.
-W = dolfin.assemble(
-    ufl.inner(dolfin.Constant(d * (1.0,)), dolfin.TestFunction(spline.V)) * spline.dx
+
+W = dolfinx.fem.assemble_vector(
+    dolfinx.fem.form(ufl.inner(dolfinx.fem.Constant(spline.mesh, d * (1.0,)),
+                               ufl.TestFunction(spline.V)) * spline.dx)
 )
-quadWeightsTemp = W.get_local()
-quadWeights = zeros(nNodes)
+
+# FIXME: to vectorize
+Warray = W.array
+quadWeights = np.zeros(nNodes)
 for i in range(0, nNodes):
-    quadWeights[i] = quadWeightsTemp[nodeToDof(i, 0)]
+    quadWeights[i] = W.array[nodeToDof(i, 0)]
 
 # Points closer together than this distance in the reference configuration
 # do not interact through contact forces.
@@ -188,37 +196,46 @@ def assembleContact(dispFunc):
     """
 
     # Establish tensors to accumulate contact contributions.
-    F = dolfin.assemble(
-        ufl.inner(dolfin.Constant(d * (0.0,)), dolfin.TestFunction(spline.V)) * ufl.dx,
-        finalize_tensor=False,
-    )
-    Fv = dolfin.as_backend_type(F).vec()
-    KPETSc = PETSc.Mat()
-    KPETSc.createAIJ([[d * nNodes, None], [None, d * nNodes]])
-    KPETSc.setPreallocationNNZ([PREALLOC, PREALLOC])
-    KPETSc.setUp()
-    K = dolfin.PETScMatrix(KPETSc)
-    Km = dolfin.as_backend_type(K).mat()
+    # F = dolfinx.assemble(
+    #     ufl.inner(dolfinx.Constant(d * (0.0,)), ufl.TestFunction(spline.V))
+    #     * ufl.dx,
+    #     finalize_tensor=False,
+    # )
+    # F = dolfinx.fem.assemble_vector(
+    #     dolfinx.fem.form(0.0 * ufl.TestFunction(spline.V)) * ufl.dx)
+    # Fv = F.vector
+
+    F = PETSc.Vec()
+    F.create()
+    F.setSizes(d * nNodes)
+    F.setUp()
+
+    K = PETSc.Mat()
+    K.createAIJ([[d * nNodes, None], [None, d * nNodes]])
+    K.setPreallocationNNZ([PREALLOC, PREALLOC])
+    K.setUp()
+    # K = dolfinx.PETScMatrix(KPETSc)
+    # Km = dolfinx.as_backend_type(K).mat()
 
     # Ideally, we would first examine the set of pairs
     # returned by the cKDTree query, then allocate based
     # on that, rather than the present approach of
     # preallocating a large number of nonzeros and hoping
     # for the best.
-    Km.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
+    K.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
 
     # Obtain displacement in homogeneous representation.
-    dispFlat = dispFunc.vector().get_local()
-    disp = dispFlat.reshape((-1, d))
+    # dispFlat = dispFunc.vector().get_local()
+    disp = dispFunc.x.array.reshape((-1, d))
     # Divide nodal displacements through by FE nodal weights.
     for i in range(0, nNodes):
-        wi = spline.cpFuncs[d].vector().get_local()[i]
+        wi = spline.cpFuncs[d].x.array[i]
         for j in range(0, d):
             disp[i, j] /= wi
     # Compute deformed positions of nodes in physical space.
     nodex = nodeX + disp
 
-    tree = cKDTree(nodex)
+    tree = sp.spatial.cKDTree(nodex)
     pairs = tree.query_pairs(r_max, output_type="ndarray")
 
     # Because the ndarray output from the scipy cKDTree maps onto a C++ type,
@@ -233,7 +250,7 @@ def assembleContact(dispFunc):
         # configuration:
         X1 = nodeX[node1, :]
         X2 = nodeX[node2, :]
-        R12 = npNorm(X2 - X1)
+        R12 = np.linalg.norm(X2 - X1)
 
         # Do not add contact forces between points that are too close in the
         # reference configuration.  (Otherwise, the entire structure would
@@ -246,23 +263,23 @@ def assembleContact(dispFunc):
 
             # Force computation: see (24) from original reference.
             r12vec = x2 - x1
-            r12 = npNorm(r12vec)
+            r12 = np.linalg.norm(r12vec)
             r12hat = r12vec / r12
-            r_otimes_r = npOuter(r12hat, r12hat)
-            I = npIdentity(d)
+            r_otimes_r = np.outer(r12hat, r12hat)
+            I = np.identity(d)
             C = quadWeights[node1] * quadWeights[node2]
             f12 = C * phiPrime(r12) * r12hat
 
             # Nodal FE spline (not quadrature) weights:
-            w1 = spline.cpFuncs[d].vector().get_local()[node1]
-            w2 = spline.cpFuncs[d].vector().get_local()[node2]
+            w1 = spline.cpFuncs[d].vector.array_r[node1]
+            w2 = spline.cpFuncs[d].vector.array_r[node2]
 
             # Add equal-and-opposite forces to the RHS vector.
             for direction in range(0, d):
                 dof1 = nodeToDof(node1, direction)
                 dof2 = nodeToDof(node2, direction)
-                Fv.setValue(dof1, -f12[direction] / w1, addv=ADD_MODE)
-                Fv.setValue(dof2, f12[direction] / w2, addv=ADD_MODE)
+                F.setValue(dof1, -f12[direction] / w1, addv=ADD_MODE)
+                F.setValue(dof2, f12[direction] / w2, addv=ADD_MODE)
                 # (Weights are involved here because the FE test function
                 # that goes to 1 at a node is in homogeneous representation.)
 
@@ -282,29 +299,35 @@ def assembleContact(dispFunc):
                     k12 = k12_tensor[d1, d2]
 
                     # 11 contribution:
-                    Km.setValue(n1dof1, n1dof2, k12 / (w1 * w1), addv=ADD_MODE)
+                    K.setValue(n1dof1, n1dof2, k12 / (w1 * w1), addv=ADD_MODE)
                     # 22 contribution:
-                    Km.setValue(n2dof1, n2dof2, k12 / (w2 * w2), addv=ADD_MODE)
+                    K.setValue(n2dof1, n2dof2, k12 / (w2 * w2), addv=ADD_MODE)
                     # Off-diagonal contributions:
-                    Km.setValue(n1dof1, n2dof2, -k12 / (w1 * w2), addv=ADD_MODE)
-                    Km.setValue(n2dof1, n1dof2, -k12 / (w1 * w2), addv=ADD_MODE)
+                    K.setValue(n1dof1, n2dof2, -k12 /
+                               (w1 * w2), addv=ADD_MODE)
+                    K.setValue(n2dof1, n1dof2, -k12 /
+                               (w1 * w2), addv=ADD_MODE)
                     # (Weights are involved here because FE test and trial
                     # space basis functions that go to 1 at nodes are in
                     # homogeneous representation.)
-    Fv.assemble()
-    Km.assemble()
+    F.assemble()
+    K.assemble()
 
     return K, F
 
 
 # Displacement solution at current and previous time steps:
-DELTA_T = dolfin.Constant(0.001)
-y_hom = dolfin.Function(spline.V)
-y_old_hom = dolfin.Function(spline.V)
-ydot_hom = (
-    dolfin.Constant(1.0 / DELTA_T) * y_hom + dolfin.Constant(-1.0 / DELTA_T) * y_old_hom
-)
-ydot_old_hom = dolfin.Function(spline.V)
+DELTA_T = 0.001
+DELTA_T_inv = 1.0 / DELTA_T
+y_hom = dolfinx.fem.Function(spline.V)
+y_hom.name = "disp"
+y_old_hom = dolfinx.fem.Function(spline.V)
+# ydot_hom = dolfinx.fem.Function(spline.V)
+ydot_old_hom = dolfinx.fem.Function(spline.V)
+# yddot_hom = dolfinx.fem.Function(spline.V)
+
+ydot_hom = DELTA_T_inv * y_hom + (-DELTA_T_inv) * y_old_hom
+# ydot_old_hom = dolfin.Function(spline.V)
 yddot_hom = (ydot_hom - ydot_old_hom) / DELTA_T
 
 # Displacement solution and time derivatives in rational form:
@@ -334,7 +357,8 @@ def shellGeometry(x):
 
     # Metric tensor:
     a = ufl.as_matrix(
-        ((ufl.inner(a0, a0), ufl.inner(a0, a1)), (ufl.inner(a1, a0), ufl.inner(a1, a1)))
+        ((ufl.inner(a0, a0), ufl.inner(a0, a1)),
+         (ufl.inner(a1, a0), ufl.inner(a1, a1)))
     )
     # Curvature:
     deriva2 = spline.parametricGrad(a2)
@@ -399,15 +423,15 @@ def voigt(T):
 
 
 # The Young's modulus and Poisson ratio:
-E = dolfin.Constant(1e7)
-nu = dolfin.Constant(0.3)
+E = 1.0e7
+nu = 0.3
 
 # The material matrix:
 D = (E / (1.0 - nu * nu)) * ufl.as_matrix(
     [[1.0, nu, 0.0], [nu, 1.0, 0.0], [0.0, 0.0, 0.5 * (1.0 - nu)]]
 )
 # The shell thickness:
-h_th = dolfin.Constant(0.004)
+h_th = 0.004
 
 # Extension and bending resultants:
 nBar = h_th * D * voigt(epsilonBar)
@@ -424,23 +448,21 @@ Wint = (
 # function z to obtain the internal virtual work.  Because y is not a
 # Function, and therefore not a valid argument to derivative(), we take
 # the derivative w.r.t. y_hom, in the direction z_hom, which is equivalent.
-z_hom = dolfin.TestFunction(spline.V)
+z_hom = ufl.TestFunction(spline.V)
 z = spline.rationalize(z_hom)
-dWint = dolfin.derivative(Wint, y_hom, z_hom)
+dWint = ufl.derivative(Wint, y_hom, z_hom)
 
 # Mass density:
-DENS = dolfin.Constant(1.0)
+DENS = 1.0
 
 # Inertial contribution to the residual, including a body force on the right
 # ends of the ribbons.
-bodyForceMag = ufl.conditional(
-    ufl.gt(X[0], 10.0), dolfin.Constant(1e3), dolfin.Constant(0.0)
-)
-bodyForce = ufl.as_vector([bodyForceMag, dolfin.Constant(0.0), dolfin.Constant(0.0)])
+bodyForceMag = ufl.conditional(ufl.gt(X[0], 10.0), 1e3, 0.0)
+bodyForce = ufl.as_vector([bodyForceMag, 0.0, 0.0])
 dWmass = DENS * h_th * ufl.inner(yddot - bodyForce, z) * spline.dx
 
 # Mass damping:
-DAMP = dolfin.Constant(1.0e0)
+DAMP = 1.0e0
 dWdamp = DAMP * DENS * h_th * ufl.inner(ydot, z) * spline.dx
 
 # The full nonlinear residual for the shell problem:
@@ -448,7 +470,7 @@ res = dWmass + dWint + dWdamp
 
 # Use derivative() to obtain the consistent tangent of the nonlinear residual,
 # considered as a function of displacement in homogeneous coordinates.
-Dres = dolfin.derivative(res, y_hom)
+Dres = ufl.derivative(res, y_hom)
 
 # Settings for the time stepping and Newton iteration:
 N_TIME_STEPS = 3000
@@ -456,17 +478,8 @@ MAX_ITERS = 100
 REL_TOL = 1e-2
 
 # For x, y, and z components of displacement:
-d0File = dolfin.File("results/disp-x.pvd")
-d1File = dolfin.File("results/disp-y.pvd")
-d2File = dolfin.File("results/disp-z.pvd")
-
-# For x, y, and z components of initial configuration:
-F0File = dolfin.File("results/F-x.pvd")
-F1File = dolfin.File("results/F-y.pvd")
-F2File = dolfin.File("results/F-z.pvd")
-
-# For weights:
-F3File = dolfin.File("results/F-w.pvd")
+vtx = dolfinx.io.VTXWriter(
+    spline.mesh.comm, "results/disp.bp", [y_hom] + spline.cpFuncs)
 
 # Number of time steps per output file batch:
 OUTPUT_SKIP = 5
@@ -478,23 +491,7 @@ for timeStep in range(0, N_TIME_STEPS):
 
     # Output fields needed for visualization.
     if timeStep % OUTPUT_SKIP == 0:
-        (d0, d1, d2) = y_hom.split()
-        d0.rename("d0", "d0")
-        d1.rename("d1", "d1")
-        d2.rename("d2", "d2")
-        d0File << d0
-        d1File << d1
-        d2File << d2
-        # (Note that the components of spline.F are rational, and cannot be
-        # directly outputted to ParaView files.)
-        spline.cpFuncs[0].rename("F0", "F0")
-        spline.cpFuncs[1].rename("F1", "F1")
-        spline.cpFuncs[2].rename("F2", "F2")
-        spline.cpFuncs[3].rename("F3", "F3")
-        F0File << spline.cpFuncs[0]
-        F1File << spline.cpFuncs[1]
-        F2File << spline.cpFuncs[2]
-        F3File << spline.cpFuncs[3]
+        vtx.write(t=float(timeStep))
 
     # Because of the non-standard assembly process, in which contributions
     # not coming from a UFL Form are directly added to the residual and
@@ -503,22 +500,26 @@ for timeStep in range(0, N_TIME_STEPS):
     for newtonStep in range(0, MAX_ITERS):
 
         # First, assemble the contributions coming from UFL Forms.
-        K = dolfin.assemble(Dres)
-        F = dolfin.assemble(res)
+        K = dolfinx.fem.petsc.assemble_matrix(dolfinx.fem.form(Dres))
+        K.assemble()
+
+        F = dolfinx.fem.petsc.assemble_vector(dolfinx.fem.form(res))
+        F.assemble()
 
         # Next, add on the contact contributions, assembled using the
         # function defined above.
         Kc, Fc = assembleContact(y_hom)
-        K += Kc
-        F += Fc
+        K.axpy(1.0, Kc)
+        F.axpy(1.0, Fc)
 
         # Apply the extraction to an IGA function space.  (This applies
         # the Dirichlet BCs on the IGA unknowns.)
+
         MTKM = spline.extractMatrix(K)
         MTF = spline.extractVector(F)
 
         # Check the nonlinear residual.
-        Fnorm = dolfin.norm(MTF)
+        Fnorm = MTF.norm(PETSc.NormType.NORM_2)
         if newtonStep == 0:
             Fnorm0 = Fnorm
         relNorm = Fnorm / Fnorm0
@@ -532,9 +533,10 @@ for timeStep in range(0, N_TIME_STEPS):
 
         # Solve for the nonlinear increment, and add it to the current
         # solution guess.
-        dy_hom = dolfin.Function(spline.V)
+        dy_hom = dolfinx.fem.Function(spline.V)
         spline.solveLinearSystem(MTKM, MTF, dy_hom)
-        y_hom.assign(y_hom - dy_hom)
+        # FIXME to do with arrays ?
+        y_hom.vector.axpy(-1.0, dy_hom.vector)
 
         if relNorm < REL_TOL:
             break
@@ -543,9 +545,14 @@ for timeStep in range(0, N_TIME_STEPS):
             exit()
 
     # Move to the next time step.
-    ydot_old_hom.assign(ydot_hom)
-    y_old_hom.assign(y_hom)
 
+    ydot_old_hom.vector.array[:] = DELTA_T_inv * \
+        (y_hom.vector.array - y_old_hom.vector.array)
+    y_old_hom.vector.array[:] = y_hom.vector.array
+    ydot_old_hom.x.scatter_forward()
+    y_old_hom.x.scatter_forward()
+
+vtx.close()
 
 ####### Postprocessing #######
 
@@ -555,7 +562,7 @@ for timeStep in range(0, N_TIME_STEPS):
 # Append Attributes filter.  Then use the Calculator filter to define the
 # vector field
 #
-# ((d0+F0)/F3-coordsX)*iHat+((d1+F1)/F3-coordsY)*jHat+((d2+F2)/F3-coordsZ)*kHat
+# ((disp_X+FX)/FW-coordsX)*iHat+((disp_Y+FY)/FW-coordsY)*jHat+((disp_Z+FZ)/FW-coordsZ)*kHat
 #
 # which can then be used in the Warp by Vector filter.  Because the
 # parametric domain is artificially stretched out, the result of the Warp by

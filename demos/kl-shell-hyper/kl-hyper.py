@@ -15,12 +15,12 @@ compilation in this example takes *much* longer than it does for typical
 forms. 
 """
 
-from tIGAr.common import EqualOrderSpline, ExtractedSpline, mpirank
-from tIGAr.BSplines import ExplicitBSplineControlMesh, uniformKnots
-from tIGAr.calculusUtils import getQuadRuleInterval
-from tIGAr.timeIntegration import LoadStepper
+from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
+from tIGArx.calculusUtils import getQuadRuleInterval
+from tIGArx.timeIntegration import LoadStepper
 
-import dolfin
+import dolfinx
 import ufl
 
 
@@ -37,7 +37,8 @@ NELv = 10
 degs = [2, 2]
 
 # Generate open knot vectors for each direction.
-kvecs = [uniformKnots(degs[0], -1.0, 1.0, NELu), uniformKnots(degs[1], -1.0, 1.0, NELv)]
+kvecs = [uniformKnots(degs[0], -1.0, 1.0, NELu),
+         uniformKnots(degs[1], -1.0, 1.0, NELv)]
 
 # Generate an explicit B-spline control mesh.  The argument extraDim allows
 # for increasing the dimension of physical space beyond that of parametric
@@ -67,7 +68,8 @@ for side in range(0, 2):
 
 # Write extraction data to the filesystem.
 DIR = "./extraction"
-splineGenerator.writeExtraction(DIR)
+# FIXME
+# splineGenerator.writeExtraction(DIR)
 
 
 ####### Analysis #######
@@ -88,7 +90,8 @@ if mpirank == 0:
     print("Please be patient...")
 
 # Unknown midsurface displacement
-y_hom = dolfin.Function(spline.V)  # in homogeneous representation
+y_hom = dolfinx.fem.Function(spline.V)  # in homogeneous representation
+y_hom.name = "disp"
 y = spline.rationalize(y_hom)  # in physical coordinates
 
 # Reference configuration:
@@ -114,7 +117,8 @@ def midsurfaceGeometry(x):
 
     # Midsurface metric tensor
     a = ufl.as_matrix(
-        ((ufl.inner(a0, a0), ufl.inner(a0, a1)), (ufl.inner(a1, a0), ufl.inner(a1, a1)))
+        ((ufl.inner(a0, a0), ufl.inner(a0, a1)),
+         (ufl.inner(a1, a0), ufl.inner(a1, a1)))
     )
     # Curvature
     deriv_a2 = spline.parametricGrad(a2)
@@ -190,7 +194,7 @@ def tensorToCartesian(T, a, a0, a1):
 # Return a 3D elastic strain energy density, given E in Cartesian coordinates.
 def psi_el(E):
     # Neo-Hookean potential, as an example:
-    mu = dolfin.Constant(1e4)
+    mu = dolfinx.fem.Constant(spline.mesh, 1e4)
     C = 2.0 * E + ufl.Identity(3)
     I1 = ufl.tr(C)
     return 0.5 * mu * (I1 - 3.0)
@@ -226,7 +230,7 @@ def psi(xi2):
 
 
 # Shell thickness:
-h_th = dolfin.Constant(0.03)
+h_th = dolfinx.fem.Constant(spline.mesh, 0.03)
 
 # Obtain a quadrature rule for numerical through-thickness integration:
 N_QUAD_PTS = 4
@@ -241,17 +245,17 @@ for i in range(0, N_QUAD_PTS):
 Wint = energySurfaceDensity * spline.dx
 
 # Take the Gateaux derivative of Wint in test function direction z_hom.
-z_hom = dolfin.TestFunction(spline.V)
+z_hom = ufl.TestFunction(spline.V)
 z = spline.rationalize(z_hom)
-dWint = dolfin.derivative(Wint, y_hom, z_hom)
+dWint = ufl.derivative(Wint, y_hom, z_hom)
 
 # External follower load magnitude:
-PRESSURE = dolfin.Constant(1e2)
+PRESSURE = 1.0e2
 
 # Divide loading into steps to improve nonlinear convergence.
 N_STEPS = 100
 DELTA_T = 1.0 / float(N_STEPS)
-stepper = LoadStepper(DELTA_T)
+stepper = LoadStepper(spline.mesh, DELTA_T)
 
 # Parameterize loading by a pseudo-time associated with the load stepper.
 dWext = (
@@ -265,7 +269,7 @@ dWext = (
 res = dWint + dWext
 
 # Consistent tangent:
-dRes = dolfin.derivative(res, y_hom)
+dRes = ufl.derivative(res, y_hom)
 
 # Allow many nonlinear iterations.
 spline.maxIters = 100
@@ -273,16 +277,15 @@ spline.maxIters = 100
 # Files for output:  Because an explicit B-spline is used, we can simply use
 # the homogeneous (= physical) representation of the displacement in a
 # ParaView Warp by Vector filter.
+dispFile = dolfinx.io.VTXWriter(spline.mesh.comm, "results/disp.bp", [y_hom])
 
-d0File = dolfin.File("results/disp-x.pvd")
-d1File = dolfin.File("results/disp-y.pvd")
-d2File = dolfin.File("results/disp-z.pvd")
 
 # Iterate over load steps.
 for i in range(0, N_STEPS):
     if mpirank == 0:
         print(
-            "------- Step: " + str(i + 1) + " , t = " + str(stepper.tval) + " -------"
+            "------- Step: " + str(i + 1) + " , t = " +
+            str(stepper.tval) + " -------"
         )
 
     # Execute nonlinear solve.
@@ -292,22 +295,12 @@ for i in range(0, N_STEPS):
     stepper.advance()
 
     # Output solution.
-    (d0, d1, d2) = y_hom.split()
-    d0.rename("d0", "d0")
-    d1.rename("d1", "d1")
-    d2.rename("d2", "d2")
-    d0File << d0
-    d1File << d1
-    d2File << d2
+    dispFile.write(t=stepper.tval)
+dispFile.close()
 
 
 ####### Postprocessing #######
 
 # Because we are using an explicit B-spline with unit weights on all control
 # points and equal physical and parametric spaces, it is sufficient to simply
-# load all three displacement files, apply the Append Attributes filter to
-# combine them all, use the Calculator filter to produce the vector field
-#
-#  d0*iHat + d1*jHat + d2*kHat
-#
-# and then apply the Warp by Vector filter.
+# apply the Warp by Vector filter for the field "disp".

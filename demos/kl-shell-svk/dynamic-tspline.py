@@ -1,24 +1,24 @@
 """
-This demo illustrates the implementation of the formulation developed in 
+This demo illustrates the implementation of the formulation developed in
 Josef Kiendl's dissertation
 
   http://mediatum.ub.tum.de/doc/1002634/464162.pdf
 
 for isogeometric analysis of Kirchhod demo, with analytical integration through
-the thickness of the shell.  This example uses T-splines for the 
-discretization.  
+the thickness of the shell.  This example uses T-splines for the
+discretization.
 
 The basic problem uses the geometry from Figure 4 of the paper
 
   https://web.me.iastate.edu/jmchsu/files/Kamensky_et_al-2017-CMAME.pdf
 
-and involves a sphere moving downard with some initial velocity, then being 
-repelled by a potential that models contact with a stationary horizontal 
-plate.  The plate is included in the mesh for visualization purposes, but 
-constrained to have zero displacement in the analysis, and not used to 
-compute the contact potential, which is simply hard-coded.  
+and involves a sphere moving downard with some initial velocity, then being
+repelled by a potential that models contact with a stationary horizontal
+plate.  The plate is included in the mesh for visualization purposes, but
+constrained to have zero displacement in the analysis, and not used to
+compute the contact potential, which is simply hard-coded.
 
-An archive with the required data file "sphere.iga" can be downloaded from 
+An archive with the required data file "sphere.iga" can be downloaded from
 
   https://www.dropbox.com/s/8es3zj5dsdzjqim/sphere.iga.tgz?dl=1
 
@@ -26,22 +26,26 @@ and extracted using the command "tar -xvzf sphere.iga.tgz".  (Credit to Fei Xu
 for designing this geometry in Rhino 3D, using the T-spline plugin.)
 
 Note: Parallel computation with T-spline meshes works, but is not especially
-efficient, since the element-by-element extraction data in the Rhino 3D 
-input does not contain information about the connectivity of the Bezier 
-element mesh, and nothing is currently done in the preprocessing to 
-reconstruct this connectivity data.  
+efficient, since the element-by-element extraction data in the Rhino 3D
+input does not contain information about the connectivity of the Bezier
+element mesh, and nothing is currently done in the preprocessing to
+reconstruct this connectivity data.
 """
 
-from tIGAr.common import EqualOrderSpline, ExtractedSpline, mpirank
-from tIGAr.timeIntegration import GeneralizedAlphaIntegrator
-from tIGAr.RhinoTSplines import RhinoTSplineControlMesh
+from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank
+from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
+from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
 
-import dolfin
+import dolfinx
 import ufl
+
+from dolfinx import default_real_type
+
+import numpy as np
+import os.path
 
 # Check for existence of required data file.
 FNAME = "sphere.iga"
-import os.path
 
 if not os.path.isfile(FNAME):
     if mpirank == 0:
@@ -69,22 +73,23 @@ controlMesh = RhinoTSplineControlMesh(FNAME)
 splineGenerator = EqualOrderSpline(3, controlMesh)
 
 
-# Define a region containing the plate, but not the sphere.
+# Define a function that, given a point, returns True if the point
+# is contained in the plate, but not the sphere.
 # (The plate is at $z=0$, and the sphere is in $z>0$.)
-class BdryDomain(dolfin.SubDomain):
-    def inside(self, x, on_boundary):
-        return x[2] < dolfin.DOLFIN_EPS
+def check_on_plate(x, on_boundary):
+    return x[2] < np.finfo(default_real_type).eps
 
 
 # Apply a zero BC to all three components of the shell structure displacement
 # for degrees of freedom corresponding to control points located in
 # the SubDomain BdryDomain.
 for i in range(0, 3):
-    splineGenerator.addZeroDofsByLocation(BdryDomain(), i)
+    splineGenerator.addZeroDofsByLocation(check_on_plate, i)
 
 # Write the extraction data.
 DIR = "./extraction"
-splineGenerator.writeExtraction(DIR)
+# FIXME
+# splineGenerator.writeExtraction(DIR)
 
 
 ####### Analysis #######
@@ -95,6 +100,10 @@ if mpirank == 0:
 # Read an extracted spline back in.
 QUAD_DEG = 6
 spline = ExtractedSpline(splineGenerator, QUAD_DEG)
+spline.cpFuncs[0].name = "FX"
+spline.cpFuncs[1].name = "FY"
+spline.cpFuncs[2].name = "FZ"
+spline.cpFuncs[3].name = "FW"
 
 if mpirank == 0:
     print("Starting analysis...")
@@ -105,17 +114,18 @@ if mpirank == 0:
 # spline = ExtractedSpline(DIR,QUAD_DEG)
 
 # The unknown midsurface displacement
-y_hom = dolfin.Function(spline.V)  # in homogeneous coordinates
+y_hom = dolfinx.fem.Function(spline.V)  # in homogeneous coordinates
+y_hom.name = "disp"
 y = spline.rationalize(y_hom)  # in physical coordinates
 
 # Quantities from the previous time step
-y_old_hom = dolfin.Function(spline.V)
-ydot_old_hom = dolfin.Function(spline.V)
-yddot_old_hom = dolfin.Function(spline.V)
+y_old_hom = dolfinx.fem.Function(spline.V)
+ydot_old_hom = dolfinx.fem.Function(spline.V)
+yddot_old_hom = dolfinx.fem.Function(spline.V)
 
 # Create a time integrator for the displacement.
-RHO_INF = dolfin.Constant(0.5)
-DELTA_T = dolfin.Constant(0.001)
+RHO_INF = 0.5
+DELTA_T = 0.001
 timeInt = GeneralizedAlphaIntegrator(
     RHO_INF, DELTA_T, y_hom, (y_old_hom, ydot_old_hom, yddot_old_hom)
 )
@@ -152,7 +162,8 @@ def shellGeometry(x):
 
     # Metric tensor:
     a = ufl.as_matrix(
-        ((ufl.inner(a0, a0), ufl.inner(a0, a1)), (ufl.inner(a1, a0), ufl.inner(a1, a1)))
+        ((ufl.inner(a0, a0), ufl.inner(a0, a1)),
+         (ufl.inner(a1, a0), ufl.inner(a1, a1)))
     )
     # Curvature:
     deriva2 = spline.parametricGrad(a2)
@@ -217,8 +228,8 @@ def voigt(T):
 
 
 # The Young's modulus and Poisson ratio:
-E = dolfin.Constant(3e4)
-nu = dolfin.Constant(0.3)
+E = 3e4
+nu = 0.3
 
 # The material matrix:
 D = (E / (1.0 - nu * nu)) * ufl.as_matrix(
@@ -242,9 +253,9 @@ Wint = (
 # function z to obtain the internal virtual work.  Because y_alpha is not
 # a valid argument to derivative(), we take the derivative w.r.t. y_hom
 # instead, then scale by $1/\alpha_f$.
-z_hom = dolfin.TestFunction(spline.V)
+z_hom = ufl.TestFunction(spline.V)
 z = spline.rationalize(z_hom)
-dWint = dolfin.Constant(1.0 / timeInt.ALPHA_F) * dolfin.derivative(Wint, y_hom, z_hom)
+dWint = (1.0 / timeInt.ALPHA_F) * ufl.derivative(Wint, y_hom, z_hom)
 
 
 # Note that taking the derivative w.r.t. the homogeneous representation in
@@ -263,19 +274,15 @@ dWint = dolfin.Constant(1.0 / timeInt.ALPHA_F) * dolfin.derivative(Wint, y_hom, 
 
 
 # Mass density:
-DENS = dolfin.Constant(10.0)
+DENS = 10.0
 
 # Inertial contribution to the residual:
 dWmass = DENS * h_th * ufl.inner(yddot_alpha, z) * spline.dx
 
 # The penalty potential to model collision with the plate:
-PENALTY = dolfin.Constant(1e8)
-gapFunction = ufl.conditional(
-    ufl.lt(x[2], dolfin.Constant(0.0)), -x[2], dolfin.Constant(0.0)
-)
-contactForce = ufl.as_vector(
-    (dolfin.Constant(0.0), dolfin.Constant(0.0), PENALTY * gapFunction)
-)
+PENALTY = 1e8
+gapFunction = ufl.conditional(ufl.lt(x[2], 0.0), -x[2], 0.0)
+contactForce = ufl.as_vector((0.0, 0.0, PENALTY * gapFunction))
 dWext = ufl.inner(-contactForce, z) * spline.dx
 
 # The full nonlinear residual for the shell problem:
@@ -283,10 +290,17 @@ res = dWmass + dWint + dWext
 
 # Use derivative() to obtain the consistent tangent of the nonlinear residual,
 # considered as a function of displacement in homogeneous coordinates.
-dRes = dolfin.derivative(res, y_hom)
+dRes = ufl.derivative(res, y_hom)
 
 # Apply an initial condition to the sphere's velocity.
-timeInt.xdot_old.interpolate(dolfin.Expression(("0.0", "0.0", "-10.0"), degree=1))
+# Note: Seems like the interpolation component by component
+# is the only option here.
+const_vec = [0.0, 0.0, -10.0]
+for field in range(len(const_vec)):
+    sub_func = timeInt.xdot_old.sub(field)
+    val = dolfinx.default_scalar_type(const_vec[field])
+    sub_func.interpolate(lambda x: np.full((x.shape[1],), val))
+
 
 # Adjust solver settings to be more robust than defaults, due to extreme
 # nonlinearities in the problem.
@@ -301,23 +315,15 @@ spline.relativeTolerance = 1e-3
 # makes loading time series in ParaView more straightforward.)
 
 # For x, y, and z components of displacement:
-d0File = dolfin.File("results/disp-x.pvd")
-d1File = dolfin.File("results/disp-y.pvd")
-d2File = dolfin.File("results/disp-z.pvd")
-
-# For x, y, and z components of initial configuration:
-F0File = dolfin.File("results/F-x.pvd")
-F1File = dolfin.File("results/F-y.pvd")
-F2File = dolfin.File("results/F-z.pvd")
-
-# For weights:
-F3File = dolfin.File("results/F-w.pvd")
+vtx = dolfinx.io.VTXWriter(
+    spline.mesh.comm, "results/disp.bp", [y_hom] + spline.cpFuncs)
 
 for i in range(0, 50):
 
     if mpirank == 0:
         print(
-            "------- Time step " + str(i + 1) + " , t = " + str(timeInt.t) + " -------"
+            "------- Time step " + str(i + 1) +
+            " , t = " + str(timeInt.t) + " -------"
         )
 
     # Solve the nonlinear problem for this time step and put the solution
@@ -325,26 +331,12 @@ for i in range(0, 50):
     spline.solveNonlinearVariationalProblem(res, dRes, y_hom)
 
     # Output fields needed for visualization.
-    (d0, d1, d2) = y_hom.split()
-    d0.rename("d0", "d0")
-    d1.rename("d1", "d1")
-    d2.rename("d2", "d2")
-    d0File << d0
-    d1File << d1
-    d2File << d2
-    # (Note that the components of spline.F are rational, and cannot be
-    # directly outputted to ParaView files.)
-    spline.cpFuncs[0].rename("F0", "F0")
-    spline.cpFuncs[1].rename("F1", "F1")
-    spline.cpFuncs[2].rename("F2", "F2")
-    spline.cpFuncs[3].rename("F3", "F3")
-    F0File << spline.cpFuncs[0]
-    F1File << spline.cpFuncs[1]
-    F2File << spline.cpFuncs[2]
-    F3File << spline.cpFuncs[3]
+    vtx.write(timeInt.t)
 
     # Advance to the next time step.
     timeInt.advance()
+
+vtx.close()
 
 
 ####### Postprocessing #######
@@ -355,7 +347,7 @@ for i in range(0, 50):
 # Append Attributes filter.  Then use the Calculator filter to define the
 # vector field
 #
-# ((d0+F0)/F3-coordsX)*iHat+((d1+F1)/F3-coordsY)*jHat+((d2+F2)/F3-coordsZ)*kHat
+# ((disp_X+FX)/FW-coordsX)*iHat+((disp_Y+FY)/FW-coordsY)*jHat+((disp_Z+FZ)/FW-coordsZ)*kHat
 #
 # which can then be used in the Warp by Vector filter.  Because the
 # parametric domain is artificially stretched out, the result of the Warp by

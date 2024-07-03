@@ -1,16 +1,22 @@
 """
-The ``common`` module 
+The ``common`` module
 ---------------------
-contains basic definitions of abstractions for 
+contains basic definitions of abstractions for
 generating extraction data and importing it again for use in analysis.  Upon
-importing this module, a number of setup steps are carried out 
+importing this module, a number of setup steps are carried out
 (e.g., initializing MPI).
 """
 
-from tIGAr.calculusUtils import (
+import ufl.equation
+import scipy as sp
+import numpy as np
+import abc
+from mpi4py import MPI
+from petsc4py import PETSc
+from tIGArx.calculusUtils import (
     getMetric,
     mappedNormal,
-    tIGArMeasure,
+    tIGArxMeasure,
     volumeJacobian,
     surfaceJacobian,
     cartesianGrad,
@@ -23,23 +29,18 @@ from tIGAr.calculusUtils import (
     curvilinearDiv,
 )
 
-import dolfin
-import petsc4py, sys
+import dolfinx
+from dolfinx.io import XDMFFile
+from dolfinx.fem.petsc import assemble_matrix as petsc_assemble_matrix
+from dolfinx.fem.petsc import assemble_vector as petsc_assemble_vector
+from dolfinx import default_real_type
+import basix
+import petsc4py
+import sys
+
 
 petsc4py.init(sys.argv)
-from petsc4py import PETSc
-from mpi4py import MPI
 
-import abc
-
-import numpy as np
-import scipy as sp
-
-import ufl.equation
-
-if dolfin.parameters["linear_algebra_backend"] != "PETSc":
-    print("ERROR: tIGAr requires PETSc.")
-    exit()
 
 worldcomm = MPI.COMM_WORLD
 selfcomm = MPI.COMM_SELF
@@ -48,6 +49,7 @@ mpisize = worldcomm.Get_size()
 mpirank = worldcomm.Get_rank()
 
 
+# FIXME to figure out right indices.
 INDEX_TYPE = "int32"
 # DEFAULT_PREALLOC = 100
 DEFAULT_PREALLOC = 500
@@ -61,7 +63,12 @@ else:
 
 # basis function evaluations less than this will be considered outside the
 # function's support
-DEFAULT_BASIS_FUNC_IGNORE_EPS = 1e-15
+DEFAULT_BASIS_FUNC_IGNORE_EPS = 10.0 * np.finfo(default_real_type).eps
+
+# DEFAULT_LINSOLVER_REL_TOL = 10.0 * np.finfo(default_real_type).eps
+DEFAULT_LINSOLVER_REL_TOL = 1.0e-10
+DEFAULT_LINSOLVER_ABS_TOL = PETSc.DEFAULT
+DEFAULT_LINSOLVER_MAX_ITERS = 1000
 
 # This was too small for optimal convergence rates in high-order biharmonic
 # discretizations with highly-refined meshes:
@@ -69,35 +76,33 @@ DEFAULT_BASIS_FUNC_IGNORE_EPS = 1e-15
 
 
 # file naming conventions
-EXTRACTION_DATA_FILE = "extraction-data.h5"
+EXTRACTION_MESH_FILE = "extraction-mesh.xdmf"
 EXTRACTION_INFO_FILE = "extraction-info.txt"
-EXTRACTION_H5_MESH_NAME = "/mesh"
+
+# FIXME is this really needed ?
 
 
 def EXTRACTION_H5_CONTROL_FUNC_NAME(dim):
     return "/control" + str(dim)
 
 
-# def EXTRACTION_ZERO_DOFS_FILE(proc):
-#    return "/zero-dofs"+str(proc)+".dat"
-EXTRACTION_ZERO_DOFS_FILE = "zero-dofs.dat"
-EXTRACTION_MAT_FILE = "extraction-mat.dat"
-EXTRACTION_MAT_FILE_CTRL = "extraction-mat-ctrl.dat"
+EXTRACTION_ZERO_DOFS_FILE = "zero-dofs.h5"
+EXTRACTION_MAT_FILE = "extraction-mat.h5"
+EXTRACTION_MAT_FILE_CTRL = "extraction-mat-ctrl.h5"
+EXTRACTION_VEC_FILE_CTRL_PTS = "extraction-vec-ctrl-pts.h5"
 
 # DG space is more memory-hungry, but allows for $C^{-1}$-continuous splines,
 # e.g., for div-conforming VMS, and will still work for more continuous
-# spaces.  Right now, it is not supported for quad/hex elements.
+# spaces.
 USE_DG_DEFAULT = True
-
-# whether or not to use tensor product elements by default
-USE_RECT_ELEM_DEFAULT = True
 
 # whether or not to explicitly form M^T (memory vs. speed tradeoff)
 FORM_MT = False
 
-
-# Helper function to generate unique temporary file names for DOLFIN
+# Helper function to generate unique temporary file names for dolfinx
 # XML meshes; file name is unique for a given rank on a given communicator.
+
+
 def generateMeshXMLFileName(comm):
     import hashlib
 
@@ -109,17 +114,14 @@ def generateMeshXMLFileName(comm):
 # results vector
 def multTranspose(M, b):
     """
-    Returns ``M^T*b``, where ``M`` and ``b`` are DOLFIN ``GenericTensor`` and
-    ``GenericVector`` objects.
+    Returns ``M^T*b``, where ``M`` and ``b`` are PETSc matrix and tensor
+    objects.
     """
-    totalDofs = dolfin.as_backend_type(M).mat().getSizes()[1][1]
-    comm = dolfin.as_backend_type(M).mat().getComm()
-    MTbv = PETSc.Vec(comm)
-    MTbv.create(comm=comm)
-    MTbv.setSizes(totalDofs)
-    MTbv.setUp()
-    dolfin.as_backend_type(M).mat().multTranspose(dolfin.as_backend_type(b).vec(), MTbv)
-    return dolfin.PETScVector(MTbv)
+    MTb = M.createVecRight()
+    M.multTranspose(b, MTb)
+    MTb.assemble()
+
+    return MTb
 
 
 # helper function to generate an identity permutation IS
@@ -135,9 +137,84 @@ def generateIdentityPermutation(ownRange, comm=worldcomm):
     iArray = np.zeros(localSize, dtype=INDEX_TYPE)
     for i in np.arange(0, localSize):
         iArray[i] = i + iStart
+    # FIXME to simplify as iArray = np.arange(ownRange[0], ownRange[1], dtype=INDEX_TYPE)
     retval = PETSc.IS(comm)
     retval.createGeneral(iArray, comm=comm)
     return retval
+
+
+def getCellType(dim):
+    assert 1 <= dim and dim <= 3, "Invalid dimension."
+
+    if dim == 1:
+        cell = basix.CellType.interval
+    elif dim == 2:
+        cell = basix.CellType.quadrilateral
+    else:
+        cell = basix.CellType.hexahedron
+    return cell
+
+
+def createElementType(degree, dim, discontinuous):
+    """
+    Returns an UFL element of the given degree either continuous or
+    discontinuous, depending on the return of useDG().
+    #FIXME to document better.
+    """
+
+    cell = getCellType(dim)
+    family = basix.ElementFamily.P
+    variant = basix.LagrangeVariant.equispaced
+
+    ufl_elem = basix.ufl.element(
+        family=family, cell=cell, degree=degree, lagrange_variant=variant, discontinuous=discontinuous)
+    return ufl_elem
+
+
+def createVectorElementType(degrees, dim, discontinuous, nFields):
+    """
+    Returns an UFL element of the given degree either continuous or
+    discontinuous, depending on the return of useDG().
+    #FIXME to document better.
+    """
+
+    assert len(degrees) == nFields
+
+    if len(degrees) == 1:
+        ufl_elem = createElementType(degrees[0], dim, discontinuous)
+
+    elif len(set(degrees)) == 1:  # Isotropic degrees
+
+        scalar_elem = createElementType(degrees[0], dim, discontinuous)
+
+        ufl_elem = basix.ufl.element(
+            family=scalar_elem.family_name, cell=scalar_elem.cell_type, degree=scalar_elem.element.degree, lagrange_variant=scalar_elem.lagrange_variant, discontinuous=scalar_elem.discontinuous, shape=(nFields,))
+    else:
+        if not isDolfinxVersion8orHigher() and mpisize > 1:
+            raise Exception("Currently, due to a dolfinx bug in versions < 0.8.0, it is not possible to use mixed element in parallel. See https://fenicsproject.discourse.group/t/degrees-of-freedom-of-sub-spaces-in-parallel/14351")
+
+        scalar_elems = [createElementType(
+            deg, dim, discontinuous) for deg in degrees]
+        ufl_elem = basix.ufl.mixed_element(scalar_elems)
+
+    return ufl_elem
+
+
+def isDolfinxVersion8orHigher():
+    """ FIXME to document
+    """
+    from packaging.version import Version
+    return Version(dolfinx.__version__) >= Version("0.8.0")
+
+
+def createFunctionSpace(mesh, ufl_elem):
+    """ FIXME to document
+    """
+    if isDolfinxVersion8orHigher():
+        V = dolfinx.fem.functionspace(mesh, ufl_elem)
+    else:
+        V = dolfinx.fem.FunctionSpace(mesh, ufl_elem)
+    return V
 
 
 class AbstractExtractionGenerator(object):
@@ -190,7 +267,35 @@ class AbstractExtractionGenerator(object):
         if self.useDG():
             return "DG"
         else:
-            return "Lagrange"
+            return "P"
+
+    def createElementType(self, degree):
+        """
+        Returns an UFL element of the given degree either continuous or
+        discontinuous, depending on the return of useDG().
+        # FIXME to document better
+        """
+
+        dim = self.mesh.topology.dim
+        discontinuous = self.useDG()
+        ufl_elem = createElementType(degree, dim, discontinuous)
+        return ufl_elem
+
+    def createVectorElementType(self, degrees, nFields):
+        """
+        Returns an UFL vector/mixed element of the given degrees either continuous or
+        discontinuous, depending on the return of useDG().
+        # FIXME to document better
+        """
+
+        if len(degrees) == 1:
+            ufl_elem = self.createElementType(degrees[0])
+        else:
+            dim = self.mesh.topology.dim
+            discontinuous = self.useDG()
+            ufl_elem = createVectorElementType(
+                degrees, dim, discontinuous, nFields)
+        return ufl_elem
 
     @abc.abstractmethod
     def customSetup(self, args):
@@ -268,7 +373,7 @@ class AbstractExtractionGenerator(object):
         Default implementation just fills in an identity permutation.
         """
         return generateIdentityPermutation(
-            self.M.mat().getOwnershipRangeColumn(), self.comm
+            self.M.getOwnershipRangeColumn(), self.comm
         )
 
     def addZeroDofsGlobal(self, newDofs):
@@ -285,6 +390,7 @@ class AbstractExtractionGenerator(object):
         given ``field`` to the list of DoFs to which
         homogeneous Dirichlet BCs will be applied during analysis.
         """
+        # FIXME maybe just newDofsGlobal = np.empty_like(newDofs)
         newDofsGlobal = newDofs[:]
         for i in range(0, len(newDofs)):
             newDofsGlobal[i] = self.globalDof(field, newDofs[i])
@@ -338,62 +444,41 @@ class AbstractExtractionGenerator(object):
         # getNsd() references that, this is still safe
         self.nsd = self.getNsd()
 
-        self.VE_control = dolfin.FiniteElement(
-            self.extractionElement(), self.mesh.ufl_cell(), self.getDegree(-1)
-        )
-        self.V_control = dolfin.FunctionSpace(self.mesh, self.VE_control)
+        self.VE_control = self.createElementType(self.getDegree(-1))
+        self.V_control = createFunctionSpace(self.mesh, self.VE_control)
 
-        if self.getNFields() > 1:
-            VE_components = []
-            for i in range(0, self.getNFields()):
-                VE_components += [
-                    dolfin.FiniteElement(
-                        self.extractionElement(),
-                        self.mesh.ufl_cell(),
-                        self.getDegree(i),
-                    ),
-                ]
+        nFields = self.getNFields()
+        degrees = [self.getDegree(i) for i in range(nFields)]
+        self.VE = self.createVectorElementType(degrees, nFields)
+        self.V = createFunctionSpace(self.mesh, self.VE)
 
-            self.VE = dolfin.MixedElement(tuple(VE_components))
-        else:
-            self.VE = dolfin.FiniteElement(
-                self.extractionElement(), self.mesh.ufl_cell(), self.getDegree(0)
-            )
-
-        self.V = dolfin.FunctionSpace(self.mesh, self.VE)
-
-        self.cpFuncs = []
-        for i in range(0, self.nsd + 1):
-            self.cpFuncs += [
-                dolfin.Function(self.V_control),
-            ]
+        self.cpFuncs = [dolfinx.fem.Function(
+            self.V_control) for _ in range(self.nsd + 1)]
 
         self.M_control = self.generateM_control()
         self.M = self.generateM()
 
         # get transpose
         if FORM_MT:
-            MT_control = dolfin.PETScMatrix(
-                self.M_control.mat().transpose(PETSc.Mat(self.comm))
-            )
+            MT_control = self.M_control.transpose(PETSc.Mat(self.comm))
 
         # generating CPs, weights in spline space:
         # (control net never permuted)
         for i in range(0, self.nsd + 1):
+            # FIXME why computing product for later on setting coordinates manually?
             if FORM_MT:
-                MTC = MT_control * (self.cpFuncs[i].vector())
+                MTC = MT_control * self.cpFuncs[i].vector
             else:
-                MTC = multTranspose(self.M_control, self.cpFuncs[i].vector())
-            Istart, Iend = dolfin.as_backend_type(MTC).vec().getOwnershipRange()
-            for I in np.arange(Istart, Iend):
-                dolfin.as_backend_type(MTC).vec()[I] = self.getHomogeneousCoordinate(
-                    I, i
-                )
-            dolfin.as_backend_type(MTC).vec().assemblyBegin()
-            dolfin.as_backend_type(MTC).vec().assemblyEnd()
+                MTC = multTranspose(self.M_control, self.cpFuncs[i].vector)
+            for I in np.arange(*MTC.getOwnershipRange()):
+                MTC[I] = self.getHomogeneousCoordinate(I, i)
+            MTC.assemble()
 
-            self.cpFuncs[i].vector().set_local((self.M_control * MTC).get_local())
-            dolfin.as_backend_type(self.cpFuncs[i].vector()).vec().ghostUpdate()
+            MTCM = self.M_control * MTC
+
+            size_local = self.cpFuncs[i].x.index_map.size_local
+            self.cpFuncs[i].x.array[:size_local] = MTCM.array_r
+            self.cpFuncs[i].x.scatter_forward()
 
         # may need to be permuted
         self.zeroDofs = []  # self.generateZeroDofs()
@@ -402,23 +487,16 @@ class AbstractExtractionGenerator(object):
         # if(mpisize > 1):
         #
         #    self.permutation = self.generatePermutation()
-        #    newM = self.M.mat()\
-        #                 .permute\
-        #                 (generateIdentityPermutation\
-        #                  (self.M.mat().getOwnershipRange()),\
-        #                  self.permutation)
-        #    self.M = PETScMatrix(newM)
+        #    id_permutation = generateIdentityPermutation(self.M.getOwnershipRange())
+        #    self.M = self.M.permute(id_permutation, self.permutation)
         #
         #    # fix list of zero DOFs
         #    self.permutationAO = PETSc.AO()
-        #    self.permutationAO\
-        #        .createBasic(self.permutation,\
-        #                     generateIdentityPermutation\
-        #                     (self.M.mat().getOwnershipRangeColumn()))
+        #    id_permutation_col = generateIdentityPermutation(self.M.getOwnershipRangeColumn())
+        #    self.permutationAO.createBasic(self.permutation, id_permutation_col)
         #    zeroDofIS = PETSc.IS()
-        #    zeroDofIS.createGeneral(array(self.zeroDofs,dtype=INDEX_TYPE))
-        #    self.zeroDofs = self.permutationAO.app2petsc\
-        #                    (zeroDofIS).getIndices()
+        #    zeroDofIS.createGeneral(np.array(self.zeroDofs,dtype=INDEX_TYPE))
+        #    self.zeroDofs = self.permutationAO.app2petsc(zeroDofIS).getIndices()
 
     def applyPermutation(self):
         """
@@ -427,28 +505,23 @@ class AbstractExtractionGenerator(object):
         of freedom, which is generated by standard mesh-partitioning
         approaches in FEniCS.
         """
-        if MPI.size(self.comm) > 1:
+        if self.comm.Get_size() > 1:
 
             self.permutation = self.generatePermutation()
-            newM = self.M.mat().permute(
-                generateIdentityPermutation(
-                    self.M.mat().getOwnershipRange(), self.comm
-                ),
-                self.permutation,
-            )
-            self.M = dolfin.PETScMatrix(newM)
+            id_perm = generateIdentityPermutation(
+                self.M.getOwnershipRange(), self.comm)
+            self.M = self.M.permute(id_perm, self.permutation)
 
             # fix list of zero DOFs
             self.permutationAO = PETSc.AO(self.comm)
-            self.permutationAO.createBasic(
-                self.permutation,
-                generateIdentityPermutation(
-                    self.M.mat().getOwnershipRangeColumn(), self.comm
-                ),
-            )
+
+            id_perm_col = generateIdentityPermutation(
+                self.M.getOwnershipRangeColumn(), self.comm)
+            self.permutationAO.createBasic(self.permutation, id_perm_col)
             zeroDofIS = PETSc.IS(self.comm)
             zeroDofIS.createGeneral(np.array(self.zeroDofs, dtype=INDEX_TYPE))
-            self.zeroDofs = self.permutationAO.app2petsc(zeroDofIS).getIndices()
+            self.zeroDofs = self.permutationAO.app2petsc(
+                zeroDofIS).getIndices()
 
     def writeExtraction(self, dirname, doPermutation=DEFAULT_DO_PERMUTATION):
         """
@@ -471,27 +544,32 @@ class AbstractExtractionGenerator(object):
         # --- function space info (element type, degree)
         # - File for each processor listing zero-ed dofs
 
+        assert False, "Functionality not tested yet"
+
         if doPermutation:
             self.applyPermutation()
 
-        # write HDF file
-        # f = HDF5File(mpi_comm_world(),dirname+"/"+EXTRACTION_DATA_FILE,"w")
-        f = dolfin.HDF5File(self.comm, dirname + "/" + EXTRACTION_DATA_FILE, "w")
-        f.write(self.mesh, EXTRACTION_H5_MESH_NAME)
-
-        for i in range(0, self.nsd + 1):
-            f.write(self.cpFuncs[i], EXTRACTION_H5_CONTROL_FUNC_NAME(i))
-        f.close()
+        # write mesh XDMF file
+        with dolfinx.io.XDMFFile(self.mesh.comm, dirname + "/" + EXTRACTION_MESH_FILE, "w") as xdmf:
+            xdmf.write_mesh(self.mesh)
 
         # PETSc matrices
-        viewer = PETSc.Viewer(self.comm).createBinary(
+
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
+            dirname + "/" + EXTRACTION_VEC_FILE_CTRL_PTS, "w"
+        )
+        for i in range(0, self.nsd + 1):
+            self.generateMesh()
+            viewer.view(self.cpFuncs[i].vector)
+
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
             dirname + "/" + EXTRACTION_MAT_FILE, "w"
         )
-        viewer(self.M.mat())
-        viewer = PETSc.Viewer(self.comm).createBinary(
+        viewer(self.M)
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
             dirname + "/" + EXTRACTION_MAT_FILE_CTRL, "w"
         )
-        viewer(self.M_control.mat())
+        viewer(self.M_control)
 
         # write out zero-ed dofs
         # dofList = self.zeroDofs
@@ -503,7 +581,7 @@ class AbstractExtractionGenerator(object):
         # f.close()
         zeroDofIS = PETSc.IS(self.comm)
         zeroDofIS.createGeneral(np.array(self.zeroDofs, dtype=INDEX_TYPE))
-        viewer = PETSc.Viewer(self.comm).createBinary(
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
             dirname + "/" + EXTRACTION_ZERO_DOFS_FILE, "w"
         )
         viewer(zeroDofIS)
@@ -519,7 +597,8 @@ class AbstractExtractionGenerator(object):
                 + "\n"
             )
             for i in range(-1, self.getNFields()):
-                fs += str(self.getDegree(i)) + "\n" + str(self.getNcp(i)) + "\n"
+                fs += str(self.getDegree(i)) + "\n" + \
+                    str(self.getNcp(i)) + "\n"
             f = open(dirname + "/" + EXTRACTION_INFO_FILE, "w")
             f.write(fs)
             f.close()
@@ -596,12 +675,12 @@ class ExtractedNonlinearSolver:
 
         # tempFunc = Function(self.problem.spline.V)
         # tempFunc.assign(self.problem.solution)
-        ## RHS of problem for initial guess IGA DoFs:
+        # RHS of problem for initial guess IGA DoFs:
         # MTtemp = self.problem.spline.extractVector(tempFunc.vector(),
         #                                           applyBCs=False)
-        ## Vector with right dimension for IGA DoFs (content doesn't matter):
+        # Vector with right dimension for IGA DoFs (content doesn't matter):
         # tempVec = self.problem.spline.extractVector(tempFunc.vector())
-        ## LHS of problem for initial guess:
+        # LHS of problem for initial guess:
         # Mm = as_backend_type(self.problem.spline.M).mat()
         # MTMm = Mm.transposeMatMult(Mm)
         # MTM = PETScMatrix(MTMm)
@@ -667,7 +746,7 @@ class ExtractedNonlinearSolver:
 
 
 # compose with deformation
-# class tIGArExpression(Expression):
+# class tIGArxExpression(Expression):
 #
 #    """
 #    A subclass of ``Expression`` which composes its attribute ``self.expr``
@@ -750,7 +829,7 @@ class ExtractedSpline(object):
         Generates instance from an ``AbstractExtractionGenerator``, without
         passing through the filesystem.  This mainly exists to circumvent
         broken parallel HDF5 file output for quads and hexes in 2017.2
-        (See Issue #1000 for DOLFIN on Bitbucket.)
+        (See Issue #1000 for dolfinx on Bitbucket.)
 
         NOTE: While seemingly-convenient for small-scale testing/demos, and
         more robust in the sense that it makes no assumptions about the
@@ -765,6 +844,7 @@ class ExtractedSpline(object):
 
         self.quadDeg = quadDeg
         self.nsd = generator.getNsd()
+        self.useDG = generator.useDG()
         self.elementType = generator.extractionElement()
         self.nFields = generator.getNFields()
         self.p_control = generator.getDegree(-1)
@@ -825,100 +905,87 @@ class ExtractedSpline(object):
                 int(lines[lineCount]),
             ]
             lineCount += 1
+
         # prealloc_control = int(lines[lineCount])
         # lineCount += 1
         # prealloc = int(lines[lineCount])
 
-        # read mesh if none provided
-        # f = HDF5File(mpi_comm_world(),dirname+"/"+EXTRACTION_DATA_FILE,'r')
-        f = dolfin.HDF5File(self.comm, dirname + "/" + EXTRACTION_DATA_FILE, "r")
+        # # read mesh if none provided
+        # # f = HDF5File(mpi_comm_world(),dirname+"/"+EXTRACTION_DATA_FILE,'r')
+        # f = dolfinx.HDF5File(self.comm, dirname + "/" +
+        #                      EXTRACTION_DATA_FILE, "r")
         if mesh == None:
-            self.mesh = dolfin.Mesh(self.comm)
-
-            # NOTE: behaves erratically in parallel for quad/hex meshes
-            # in 2017.2; hopefully will be fixed soon (see dolfin
-            # issue #1000).
-            f.read(self.mesh, EXTRACTION_H5_MESH_NAME, True)
-
+            with dolfinx.io.XDMFFile(self.comm, dirname + "/" + EXTRACTION_MESH_FILE, "r") as xdmf:
+                self.mesh = xdmf.read_mesh()
+                print(self.comm.rank, "after")
+                # kk = self.mesh.topology.index_map(2)
+                print(self.comm.rank, self.mesh.topology.original_cell_index,
+                      self.mesh.topology.index_map(2).num_ghosts)
+                # print(self.comm.rank, len(
+                #     self.mesh.topology.original_cell_index), kk.num_ghosts)
         else:
             self.mesh = mesh
 
         # create function spaces
-        self.VE_control = dolfin.FiniteElement(
-            self.elementType, self.mesh.ufl_cell(), self.p_control
-        )
-        self.V_control = dolfin.FunctionSpace(self.mesh, self.VE_control)
 
-        if self.nFields > 1:
-            VE_components = []
-            for i in range(0, self.nFields):
-                VE_components += [
-                    dolfin.FiniteElement(
-                        self.elementType, self.mesh.ufl_cell(), self.p[i]
-                    ),
-                ]
-            self.VE = dolfin.MixedElement(tuple(VE_components))
-        else:
-            self.VE = dolfin.FiniteElement(
-                self.elementType, self.mesh.ufl_cell(), self.p[0]
-            )
+        dim = self.mesh.topology.dim
+        discontinuous = self.elementType == "DG"
 
-        self.V = dolfin.FunctionSpace(self.mesh, self.VE)
+        self.VE_control = createElementType(self.p_control, dim, discontinuous)
+        self.V_control = createFunctionSpace(self.mes, self.VE_control)
+
+        self.VE = createVectorElementType(
+            self.p, dim, discontinuous, self.nFields)
+        self.V = createFunctionSpace(self.mesh, self.VE)
 
         # read control functions
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
+            dirname + "/" + EXTRACTION_VEC_FILE_CTRL_PTS, "r"
+        )
         self.cpFuncs = []
         for i in range(0, self.nsd + 1):
             self.cpFuncs += [
-                dolfin.Function(self.V_control),
+                dolfinx.fem.Function(self.V_control),
             ]
             f.read(self.cpFuncs[i], EXTRACTION_H5_CONTROL_FUNC_NAME(i))
         f.close()
 
         # read extraction matrix and create transpose for control space
-        Istart, Iend = (
-            dolfin.as_backend_type(self.cpFuncs[0].vector()).vec().getOwnershipRange()
-        )
+        # FIXME to improve
+        Istart, Iend = self.cpFuncs[0].vector.getOwnershipRange()
         nLocalNodes = Iend - Istart
-        MPETSc = PETSc.Mat(self.comm)
-        MPETSc.create(self.comm)
+        self.M_control = PETSc.Mat(self.comm)
+        self.M_control.create(self.comm)
         # arguments: [[localRows,localColumns],[globalRows,globalColums]]
         # or is it [[localRows,globalRows],[localColumns,globalColums]]?
         # the latter seems to be what comes out of getSizes()...
-        if MPI.size(self.comm) > 1:
-            MPETSc.setSizes([[nLocalNodes, None], [None, ncp_control]])
-        # MPETSc.setType('aij') # sparse
-        # MPETSc.setPreallocationNNZ(prealloc_control)
-        # MPETSc.setUp()
-        viewer = PETSc.Viewer(self.comm).createBinary(
+        if self.comm.size > 1:
+            self.M_control.setSizes([[nLocalNodes, None], [None, ncp_control]])
+
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
             dirname + "/" + EXTRACTION_MAT_FILE_CTRL, "r"
         )
-
-        self.M_control = dolfin.PETScMatrix(MPETSc.load(viewer))
+        self.M_control.load(viewer)
+        viewer.destroy()
 
         # exit()
 
         # read extraction matrix and create transpose
-        Istart, Iend = (
-            dolfin.as_backend_type(dolfin.Function(self.V).vector())
-            .vec()
-            .getOwnershipRange()
-        )
-        nLocalNodes = Iend - Istart
-        totalDofs = 0
-        for i in range(0, self.nFields):
-            totalDofs += ncp[i]
-        MPETSc2 = PETSc.Mat(self.comm)
-        MPETSc2.create(self.comm)
+        self.M = PETSc.Mat(self.comm)
+        self.M.create(self.comm)
         # arguments: [[localRows,localColumns],[globalRows,globalColums]]
-        if MPI.size(self.comm) > 1:
-            MPETSc2.setSizes([[nLocalNodes, None], [None, totalDofs]])
+        if self.comm.size > 1:
+            nLocalNodes = self.V.dofmap.index_map.size_local * self.V.dofmap.index_map_bs
+            totalDofs = sum(ncp)
+            self.M.setSizes([[nLocalNodes, None], [None, totalDofs]])
         # MPETSc2.setType('aij') # sparse
         # MPETSc2.setPreallocationNNZ(prealloc)
         # MPETSc2.setUp()
-        viewer = PETSc.Viewer(self.comm).createBinary(
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
             dirname + "/" + EXTRACTION_MAT_FILE, "r"
         )
-        self.M = dolfin.PETScMatrix(MPETSc2.load(viewer))
+        self.M.load(viewer)
+        viewer.destroy()
 
         # read zero-ed dofs
         # f = open(dirname+"/"+EXTRACTION_ZERO_DOFS_FILE(mpirank),"r")
@@ -935,11 +1002,12 @@ class ExtractedSpline(object):
         # self.zeroDofs = PETSc.IS()
         # self.zeroDofs.createGeneral(array(zeroDofs,dtype=INDEX_TYPE))
 
-        viewer = PETSc.Viewer(self.comm).createBinary(
+        viewer = PETSc.ViewerHDF5(self.comm).createBinary(
             dirname + "/" + EXTRACTION_ZERO_DOFS_FILE, "r"
         )
         self.zeroDofs = PETSc.IS(self.comm)
         self.zeroDofs.load(viewer)
+        viewer.destroy()
 
     def genericSetup(self):
         """
@@ -947,19 +1015,17 @@ class ExtractedSpline(object):
         """
 
         # for marking subdomains
-        # self.boundaryMarkers = FacetFunctionSizet(self.mesh,0)
-        # self.boundaryMarkers \
-        #    = MeshFunctionSizet(self.mesh,self.mesh.topology().dim()-1,0)
-        self.boundaryMarkers = dolfin.MeshFunction(
-            "size_t", self.mesh, self.mesh.topology().dim() - 1, 0
-        )
+        tag = 0
+        fdim = self.mesh.topology.dim - 1
+        self.mesh.topology.create_connectivity(self.mesh.topology.dim, fdim)
+        all_facets = np.arange(*self.mesh.topology.index_map(fdim).local_range)
+        self.boundaryMarkers = dolfinx.mesh.meshtags(
+            self.mesh, fdim, all_facets, np.full_like(all_facets, tag))
 
         # caching transposes of extraction matrices
         if FORM_MT:
-            self.MT_control = dolfin.PETScMatrix(
-                self.M_control.mat().transpose(PETSc.Mat(self.comm))
-            )
-            self.MT = dolfin.PETScMatrix(self.M.mat().transpose(PETSc.Mat(self.comm)))
+            self.MT_control = self.M_control.transpose(PETSc.Mat(self.comm))
+            self.MT = self.M.transpose(PETSc.Mat(self.comm))
 
         # geometrical mapping
         components = []
@@ -967,7 +1033,7 @@ class ExtractedSpline(object):
             components += [
                 self.cpFuncs[i] / self.cpFuncs[self.nsd],
             ]
-        self.F = dolfin.as_vector(components)
+        self.F = ufl.as_vector(components)
         self.DF = ufl.grad(self.F)
 
         # debug
@@ -977,15 +1043,16 @@ class ExtractedSpline(object):
         self.g = getMetric(self.F)  # (self.DF.T)*self.DF
 
         # normal of pre-image in coordinate chart
-        self.N = dolfin.FacetNormal(self.mesh)
+        self.N = ufl.FacetNormal(self.mesh)
 
         # normal that preserves orthogonality w/ pushed-forward tangent vectors
         self.n = mappedNormal(self.N, self.F)
 
         # integration measures
-        self.dx = tIGArMeasure(volumeJacobian(self.g), ufl.dx, self.quadDeg)
-        self.ds = tIGArMeasure(
-            surfaceJacobian(self.g, self.N), ufl.ds, self.quadDeg, self.boundaryMarkers
+        self.dx = tIGArxMeasure(volumeJacobian(self.g), ufl.dx, self.quadDeg)
+        self.ds = tIGArxMeasure(
+            surfaceJacobian(
+                self.g, self.N), ufl.ds, self.quadDeg, self.boundaryMarkers
         )
 
         # useful for defining Cartesian differential operators
@@ -994,25 +1061,8 @@ class ExtractedSpline(object):
         # useful for tensors given in parametric coordinates
         self.gamma = getChristoffel(self.g)
 
+        self.linsolverOpts = ExtractedSpline.getDefaultPETScSolverOptions()
         self.setSolverOptions()
-
-        # linear space on mesh for projecting scalar fields onto
-        self.VE_linear = dolfin.FiniteElement("Lagrange", self.mesh.ufl_cell(), 1)
-
-        # linearList = []
-        # for i in range(0,self.nsd):
-        #    linearList += [self.VE_linear,]
-        # self.VE_displacement = MixedElement(linearList)
-
-        self.VE_displacement = dolfin.VectorElement(
-            "Lagrange", self.mesh.ufl_cell(), 1, dim=self.nsd
-        )
-
-        # self.VE_displacement = VectorElement\
-        #                       ("Lagrange",self.mesh.ufl_cell(),1)
-
-        self.V_displacement = dolfin.FunctionSpace(self.mesh, self.VE_displacement)
-        self.V_linear = dolfin.FunctionSpace(self.mesh, self.VE_linear)
 
     def FEtoIGA(self, u):
         """
@@ -1025,19 +1075,19 @@ class ExtractedSpline(object):
         NOTE: This is inefficient and should rarely be necessary.  It is
         mainly intended for testing purposes, or as a last resort.
         """
-        tempFunc = dolfin.Function(self.V)
+        tempFunc = dolfinx.fem.Function(self.V)
         tempFunc.assign(u)
         # RHS of problem for initial guess IGA DoFs:
         MTtemp = self.extractVector(tempFunc.vector(), applyBCs=False)
         # Vector with right dimension for IGA DoFs (content doesn't matter):
         tempVec = self.extractVector(tempFunc.vector())
         # LHS of problem for initial guess:
-        Mm = dolfin.as_backend_type(self.M).mat()
-        MTMm = Mm.transposeMatMult(Mm)
-        MTM = dolfin.PETScMatrix(MTMm)
+        MTM = self.M.transposeMatMult(self.M)
         if self.linearSolver == None:
-            dolfin.solve(MTM, tempVec, MTtemp)
+            # FIXME
+            dolfinx.solve(MTM, tempVec, MTtemp)
         else:
+            # FIXME
             self.linearSolver.solve(MTM, tempVec, MTtemp)
         return tempVec
 
@@ -1154,7 +1204,7 @@ class ExtractedSpline(object):
     #
     #    NOTE: Only works when extracting to simplicial elements.
     #    """
-    #    retval = tIGArExpression(degree=self.quadDeg)
+    #    retval = tIGArxExpression(degree=self.quadDeg)
     #    retval.expr = Expression(expr,degree=self.quadDeg)
     #    retval.nsd = self.nsd
     #    retval.cpFuncs = self.cpFuncs
@@ -1166,15 +1216,15 @@ class ExtractedSpline(object):
         coordinates ``'x[i]'`` in ``expr`` as parametric coordinates.
         Uses quadrature degree of spline object for interpolation degree.
         """
-        return dolfin.Expression(expr, degree=self.quadDeg)
+        return dolfinx.Expression(expr, degree=self.quadDeg)
 
     def parametricCoordinates(self):
         """
         Wrapper for ``SpatialCoordiantes()`` to avoid confusion, since
-        FEniCS's spatial coordinates are used in tIGAr as parametric
+        FEniCS's spatial coordinates are used in tIGArx as parametric
         coordinates.
         """
-        return dolfin.SpatialCoordinate(self.mesh)
+        return ufl.SpatialCoordinate(self.mesh)
 
     def spatialCoordinates(self):
         """
@@ -1204,11 +1254,10 @@ class ExtractedSpline(object):
 
         # apply zero bcs to MTAM and MTb
         if applyBCs:
-            dolfin.as_backend_type(MTb).vec().setValues(
+            MTb.setValues(
                 self.zeroDofs, np.zeros(self.zeroDofs.getLocalSize())
             )
-            dolfin.as_backend_type(MTb).vec().assemblyBegin()
-            dolfin.as_backend_type(MTb).vec().assemblyEnd()
+        MTb.assemble()
 
         return MTb
 
@@ -1219,7 +1268,9 @@ class ExtractedSpline(object):
         """
         # b = PETScVector()
         # assemble(form, tensor=b)
-        b = dolfin.assemble(form)
+        b = petsc_assemble_vector(dolfinx.fem.form(form))
+        b.ghostUpdate(addv=PETSc.InsertMode.ADD,
+                      mode=PETSc.ScatterMode.REVERSE)
 
         MTb = self.extractVector(b, applyBCs=applyBCs)
 
@@ -1234,28 +1285,20 @@ class ExtractedSpline(object):
         entries where Dirichlet BCs are applied.
         """
         if FORM_MT:
-            Am = dolfin.as_backend_type(A).mat()
-            MTm = dolfin.as_backend_type(self.MT).mat()
-            MTAm = MTm.matMult(Am)
-            Mm = dolfin.as_backend_type(self.M).mat()
-            MTAMm = MTAm.matMult(Mm)
-            MTAM = dolfin.PETScMatrix(MTAMm)
+            MTA = self.MT.matMult(A)
+            MTAM = MTA.matMult(self.M)
         else:
             # Needs recent version of petsc4py; seems to be standard version
             # used in docker container, though, since this function works
             # fine on stampede.
-            MTAM = dolfin.PETScMatrix(
-                dolfin.as_backend_type(A)
-                .mat()
-                .PtAP(dolfin.as_backend_type(self.M).mat())
-            )
+            MTAM = A.PtAP(self.M)
 
         # apply zero bcs to MTAM and MTb
         # (default behavior is to set diag=1, as desired)
         if applyBCs:
-            dolfin.as_backend_type(MTAM).mat().zeroRowsColumns(self.zeroDofs, diag)
-        dolfin.as_backend_type(MTAM).mat().assemblyBegin()
-        dolfin.as_backend_type(MTAM).mat().assemblyEnd()
+            MTAM.zeroRowsColumns(self.zeroDofs, diag)
+
+        MTAM.assemble()
 
         return MTAM
 
@@ -1268,8 +1311,8 @@ class ExtractedSpline(object):
         it can be useful to have non-default ``diag``, to move eigenvalues
         corresponding to the Dirichlet BCs.
         """
-        A = dolfin.PETScMatrix(self.comm)
-        dolfin.assemble(form, tensor=A)
+        A = petsc_assemble_matrix(dolfinx.fem.form(form))
+        A.assemble()
 
         MTAM = self.extractMatrix(A, applyBCs=applyBCs, diag=diag)
 
@@ -1290,7 +1333,74 @@ class ExtractedSpline(object):
             self.assembleVector(rhsForm, applyBCs),
         )
 
-    def solveLinearSystem(self, MTAM, MTb, u):
+    @staticmethod
+    def getDefaultPETScSolverOptions():
+        """Gets the default options for PETSc KSP solver.
+        Defaults are: conjugate gradient solver with Jacobi preconditioner,
+        relative and absolute tolerances are set to ``DEFAULT_LINSOLVER_REL_TOL``
+        and ``DEFAULT_LINSOLVER_ABS_TOLS``, respectively, and maximum number of iterations set to ``DEFAULT_LINSOLVER_MAX_ITERS``.
+
+        Returns:
+            (str, optional): Default options.
+        """
+
+        opts = {}
+        opts["ksp_type"] = "cg"  # "gmres", "preonly"
+        opts["pc_type"] = "jacobi"  # "none", "lu"
+        opts["ksp_rtol"] = DEFAULT_LINSOLVER_REL_TOL
+        opts["ksp_atol"] = DEFAULT_LINSOLVER_ABS_TOL
+        opts["ksp_max_it"] = DEFAULT_LINSOLVER_MAX_ITERS
+
+        return opts
+
+    def createPETScSolverOptions(self, problem_prefix, linsolverOpts=None):
+        """Creates PETSc KSP solver options and associates them
+        to the given prefix.
+
+        Args:
+            problem_prefix (str): Prefix string to be associated to the options.
+            linsolverOpts (dict): List of solver options.
+
+        Returns:
+            petsc4py.PETSc.Options: PETSc options for the solver.
+        """
+
+        if linsolverOpts is None:
+            linsolverOpts = self.linsolverOpts
+
+        opts = PETSc.Options()
+        opts.prefixPush(problem_prefix)
+        for k, v in linsolverOpts.items():
+            opts[k] = v
+        opts.prefixPop()
+
+        return opts
+
+    def createPETScOptionsPrefix(self):
+        """Creates the options prefix string for PETSc solver.
+        """
+        return f"dolfinx_solve_{id(self)}"
+
+    def createPETScSolver(self, comm, linsolverOpts):
+        """
+        Creates a PETSc solver based on the ``linsolverOpts``.
+        """
+
+        solver = PETSc.KSP().create(comm)
+        # solver.setOperators(MTAM)
+
+        # Give PETSc solver options a unique prefix
+        problem_prefix = self.createPETScOptionsPrefix()
+        solver.setOptionsPrefix(problem_prefix)
+
+        # Set PETSc options
+        self.createPETScSolverOptions(problem_prefix, linsolverOpts)
+
+        solver.setFromOptions()
+
+        return solver
+
+    def solveLinearSystem(self, MTAM, MTb, u, linsolverOpts=None):
         """
         Solves a linear system of the form
 
@@ -1301,25 +1411,53 @@ class ExtractedSpline(object):
         are being used), and ``MTb`` is the IGA RHS.  The FE representation
         of the solution is then the ``Function`` ``u`` which has a vector
         of coefficients given by ``M*U``.  The return value of the function
-        is ``U``, as a DOLFIN ``PETScVector``.
+        is ``U``, as a dolfinx ``PETScVector``.
+        PETSc linear solver may be set at ``solver_opts``.
         """
 
-        U = u.vector()
+        U = u.vector
         if FORM_MT:
-            MTU = (self.MT) * U
+            MTU = self.MT * U
         else:
             MTU = multTranspose(self.M, U)
-        if self.linearSolver == None:
-            dolfin.solve(MTAM, MTU, MTb)
-        else:
-            self.linearSolver.solve(MTAM, MTU, MTb)
-        u.vector().set_local(((self.M) * MTU).get_local())
-        dolfin.as_backend_type(u.vector()).vec().ghostUpdate()
-        dolfin.as_backend_type(u.vector()).vec().assemble()
+        MTU.assemble()
+
+        solver = self.createPETScSolver(
+            u.function_space.mesh.comm, linsolverOpts)
+        solver.setOperators(MTAM)
+
+        # Give PETSc solver options a unique prefix
+        problem_prefix = self.createPETScOptionsPrefix()
+
+        # Set matrix and vector PETSc options
+        MTAM.setOptionsPrefix(problem_prefix)
+        MTAM.setFromOptions()
+        MTb.setOptionsPrefix(problem_prefix)
+        MTb.setFromOptions()
+
+        # Apply boundary conditions to the rhs
+        # apply_lifting(self._b, [self._a], bcs=[self.bcs])
+        # self._b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        # set_bc(self._b, self.bcs)
+
+        # Solve linear system and update ghost values in the solution
+        solver.solve(MTb, MTU)
+        MTU.assemble()
+        # self.u.x.scatter_forward()
+
+        # if self.linearSolver == None:
+        #     dolfinx.solve(MTAM, MTU, MTb)
+        # else:
+        #     self.linearSolver.solve(MTAM, MTU, MTb)
+
+        MMTU = self.M * MTU
+        size_local = u.x.index_map.size_local * u.x.block_size
+        u.x.array[:size_local] = MMTU.array_r
+        u.x.scatter_forward()
 
         return MTU
 
-    def solveLinearVariationalProblem(self, residualForm, u, applyBCs=True):
+    def solveLinearVariationalProblem(self, residualForm, u, applyBCs=True, linsolverOpts=None):
         """
         Solves a linear variational problem with residual ``residualForm'',
         putting the solution in the ``Function`` ``u``.  Homogeneous
@@ -1327,7 +1465,8 @@ class ExtractedSpline(object):
         Boolean parameter ``applyBCs``.  Note that ``residualForm`` may also
         be given in the form of a UFL ``Equation``, e.g., ``lhs==rhs``.  The
         return value of the function is the vector of IGA degrees of freedom,
-        as a DOLFIN ``PETScVector``.
+        as a dolfinx ``PETScVector``.
+        PETSc solver options may be set at ``linsolverOpts``.
         """
 
         if isinstance(residualForm, ufl.equation.Equation):
@@ -1335,27 +1474,34 @@ class ExtractedSpline(object):
             rhsForm = residualForm.rhs
         else:
             # TODO: Why is this so much slower?
-            lhsForm = dolfin.lhs(residualForm)
-            rhsForm = dolfin.rhs(residualForm)
+            lhsForm = ufl.lhs(residualForm)
+            rhsForm = ufl.rhs(residualForm)
 
         if rhsForm.integrals() == ():
-            v = dolfin.TestFunction(self.V)
-            rhsForm = dolfin.Constant(0.0) * v[0] * self.dx
+            v = ufl.TestFunction(self.V)
+            rhsForm = dolfinx.Constant(0.0) * v[0] * self.dx
 
         MTAM, MTb = self.assembleLinearSystem(lhsForm, rhsForm, applyBCs)
-        return self.solveLinearSystem(MTAM, MTb, u)
 
-    def setSolverOptions(self, maxIters=20, relativeTolerance=1e-5, linearSolver=None):
+        x = self.solveLinearSystem(MTAM, MTb, u, linsolverOpts)
+
+        # self._solver.destroy()
+        # MTAM.destroy()
+        # MTb.destroy()
+        # x.destroy()
+
+        return x
+
+    def setSolverOptions(self, maxIters=20, relativeTolerance=1e-5):
         """
         Sets some solver options for the ``ExtractedSpline`` instance, to be
         used in ``self.solve*VariationalProblem()``.
         """
         self.maxIters = maxIters
         self.relativeTolerance = relativeTolerance
-        self.linearSolver = linearSolver
 
     def solveNonlinearVariationalProblem(
-        self, residualForm, J, u, referenceError=None, igaDoFs=None
+        self, residualForm, J, u, referenceError=None, igaDoFs=None, linsolverOpts=None
     ):
         """
         Solves a nonlinear variational problem with residual given by
@@ -1363,24 +1509,25 @@ class ExtractedSpline(object):
         the residual w.r.t. the solution, ``u``, or some user-defined
         approximation thereof.  Optionally, a given ``referenceError`` can be
         used instead of the initial residual norm to compute relative errors.
-        Optionally, an initial guess can be provided directly as a DOLFIN
+        Optionally, an initial guess can be provided directly as a dolfinx
         ``PETScVector`` of IGA degrees of freedom, which will override
         whatever is in the vector of FE coefficients for ``u`` as the
         initial guess.  If this argument is passed, it is also overwritten
         by the IGA degrees of freedom for the nonlinear problem's solution.
+        PETSc solver options may be set at ``linsolverOpts``.
         """
         returningDoFs = not isinstance(igaDoFs, type(None))
         if returningDoFs:
             # Overwrite content of u with extraction of igaDoFs.
-            u.vector().set_local(((self.M) * igaDoFs).get_local())
-            dolfin.as_backend_type(u.vector()).vec().ghostUpdate()
-            dolfin.as_backend_type(u.vector()).vec().assemble()
+            aux = self.M * igaDoFs
+            u.x.array[:] = aux.array_r
+            u.x.scatter_forward()
 
         # Newton iteration loop:
         converged = False
         for i in range(0, self.maxIters):
             MTAM, MTb = self.assembleLinearSystem(J, residualForm)
-            currentNorm = dolfin.norm(MTb)
+            currentNorm = MTb.norm(PETSc.NormType.NORM_2)
             if i == 0 and referenceError == None:
                 referenceError = currentNorm
             relativeNorm = currentNorm / referenceError
@@ -1395,27 +1542,29 @@ class ExtractedSpline(object):
             if relativeNorm < self.relativeTolerance:
                 converged = True
                 break
-            du = dolfin.Function(self.V)
-            igaIncrement = self.solveLinearSystem(MTAM, MTb, du)
-            u.assign(u - du)
+            du = dolfinx.fem.Function(self.V)
+            igaIncrement = self.solveLinearSystem(MTAM, MTb, du, linsolverOpts)
+            u.x.array[:] = u.x.array - du.x.array
+            u.x.scatter_forward()
             if returningDoFs:
                 igaDoFs -= igaIncrement
         if not converged:
             print("ERROR: Nonlinear solver failed to converge.")
             exit()
 
-    # project a scalar onto linears for plotting
-    def projectScalarOntoLinears(self, toProject, linearSolver=None, lumpMass=False):
+    # project a scalar onto a given space
+    def projectScalarOnto(self, toProject, V, linsolverOpts=None, lumpMass=False):
         """
-        L2 projection of some UFL object ``toProject`` onto a space of linear,
-        scalar FE functions (typically used for plotting).  The optional
+        L2 projection of some UFL object ``toProject`` onto a given space ``V``
+        scalar FE functions.  The optional
         parameter ``lumpMass`` is a Boolean indicating whether or not to
         lump mass in  the projection.  The optional parameter ``linearSolver``
         indicates what linear solver to use, choosing the default if
         ``None`` is passed.
+        PETSc solver options may be set at ``linsolverOpts``.
         """
-        u = dolfin.TrialFunction(self.V_linear)
-        v = dolfin.TestFunction(self.V_linear)
+        u = ufl.TrialFunction(V)
+        v = ufl.TestFunction(V)
         # don't bother w/ change of variables in integral
         # res = inner(u-toProject,v)*self.dx.meas
 
@@ -1424,24 +1573,55 @@ class ExtractedSpline(object):
         # to become very slow.
 
         if lumpMass:
-            lhsForm = ufl.inner(dolfin.Constant(1.0), v) * self.dx.meas
+            lhsForm = ufl.inner(1.0, v) * self.dx.meas
+            A = petsc_assemble_vector(dolfinx.fem.form(lhsForm))
         else:
             lhsForm = ufl.inner(u, v) * self.dx.meas  # lhs(res)
+            A = petsc_assemble_matrix(dolfinx.fem.form(lhsForm))
+
         rhsForm = ufl.inner(toProject, v) * self.dx.meas  # rhs(res)
-        A = dolfin.assemble(lhsForm)
-        b = dolfin.assemble(rhsForm)
-        u = dolfin.Function(self.V_linear)
+        b = petsc_assemble_vector(dolfinx.fem.form(rhsForm))
+
+        A.assemble()
+        b.assemble()
+
+        u = dolfinx.fem.Function(V)
+
         # solve(A,u.vector(),b)
         if lumpMass:
-            dolfin.as_backend_type(u.vector()).vec().pointwiseDivide(
-                dolfin.as_backend_type(b).vec(), dolfin.as_backend_type(A).vec()
-            )
+            u.vector.pointwiseDivide(b.vector, A.vector)
         else:
-            if linearSolver == None:
-                dolfin.solve(A, u.vector(), b)
-            else:
-                linearSolver.solve(A, u.vector(), b)
+            comm = V.mesh.comm
+            solver = self.createPETScSolver(comm, linsolverOpts)
+            solver.setOperators(A)
+
+            # Give PETSc solver options a unique prefix
+            problem_prefix = self.createPETScOptionsPrefix()
+
+            # Set matrix and vector PETSc options
+            A.setOptionsPrefix(problem_prefix)
+            A.setFromOptions()
+            b.setOptionsPrefix(problem_prefix)
+            b.setFromOptions()
+
+            # Solve linear system and update ghost values in the solution
+            solver.solve(b, u.vector)
+            u.x.scatter_forward()
+
         return u
+
+    # project a scalar onto linears for plotting
+    def projectScalarOntoControl(self, toProject, linsolverOpts=None, lumpMass=False):
+        """
+        L2 projection of some UFL object ``toProject`` onto a space of the control mesh,
+        scalar FE functions (typically used for plotting).  The optional
+        parameter ``lumpMass`` is a Boolean indicating whether or not to
+        lump mass in  the projection.  The optional parameter ``linearSolver``
+        indicates what linear solver to use, choosing the default if
+        ``None`` is passed.
+        PETSc solver options may be set at ``linsolverOpts``.
+        """
+        return self.projectScalarOnto(toProject, self.V_control, linsolverOpts, lumpMass)
 
     # project something onto the solution space; ignore bcs by default
     def project(self, toProject, applyBCs=False, rationalize=True, lumpMass=False):
@@ -1458,29 +1638,33 @@ class ExtractedSpline(object):
         default.  (Lumping may be useful for preventing oscillations when
         projecting discontinuous initial/boundary conditions.)
         """
-        u = dolfin.TrialFunction(self.V)
-        v = dolfin.TestFunction(self.V)
+
+        u = ufl.TrialFunction(self.V)
+        v = ufl.TestFunction(self.V)
         u = self.rationalize(u)
         v = self.rationalize(v)
         rhsForm = ufl.inner(toProject, v) * self.dx
-        retval = dolfin.Function(self.V)
+        retval = dolfinx.fem.Function(self.V)
         if not lumpMass:
             lhsForm = ufl.inner(u, v) * self.dx
-            self.solveLinearVariationalProblem(lhsForm == rhsForm, retval, applyBCs)
+            self.solveLinearVariationalProblem(
+                lhsForm == rhsForm, retval, applyBCs)
         else:
             if self.nFields == 1:
-                oneConstant = dolfin.Constant(1.0)
+                oneConstant = dolfinx.Constant(1.0)
             else:
-                oneConstant = dolfin.Constant(self.nFields * (1.0,))
+                oneConstant = dolfinx.Constant(self.nFields * (1.0,))
+
+            assert False, "To be revisited for dolfinx"
             lhsForm = ufl.inner(oneConstant, v) * self.dx
-            lhsVecFE = dolfin.assemble(lhsForm)
+            lhsVecFE = dolfinx.assemble(lhsForm)
             lhsVec = self.extractVector(lhsVecFE, applyBCs=False)
-            rhsVecFE = dolfin.assemble(rhsForm)
+            rhsVecFE = dolfinx.assemble(rhsForm)
             rhsVec = self.extractVector(rhsVecFE, applyBCs=applyBCs)
-            igaDoFs = self.extractVector(dolfin.Function(self.V).vector())
-            dolfin.as_backend_type(igaDoFs).vec().pointwiseDivide(
-                dolfin.as_backend_type(rhsVec).vec(),
-                dolfin.as_backend_type(lhsVec).vec(),
+            igaDoFs = self.extractVector(dolfinx.fem.Function(self.V).vector())
+            igaDoFs.pointwiseDivide(
+                rhsVec.vector,
+                lhsVec.vector
             )
             retval.vector()[:] = self.M * igaDoFs
         if rationalize:
@@ -1498,7 +1682,7 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
     multi-patch constructions.
     """
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getNodesAndEvals(self, x, field):
         """
         Given a parametric point ``x``, return a list of the form
@@ -1518,14 +1702,22 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
         used to represent all homogeneous components of the mapping ``F``
         from parametric to physical space.
         """
+        return self.impl_generateM(True)
 
-        func = dolfin.Function(self.V_control)
-        Istart, Iend = dolfin.as_backend_type(func.vector()).vec().getOwnershipRange()
+    def generateM(self):
+        """
+        Generates the extraction matrix for the mixed function space of
+        all unknown scalar fields.
+        """
+        return self.impl_generateM(False)
 
-        nLocalNodes = Iend - Istart
-        x_nodes = self.V_control.tabulate_dof_coordinates().reshape(
-            (-1, self.mesh.geometry().dim())
-        )
+    def impl_generateM(self, is_control):
+        """
+        Generates the extraction matrix for either the scalar spline space
+        used to represent all homogeneous components of the mapping ``F``
+        (is_control=True) of for the mixed function space of all unknown
+        scalar fields (is_control=False).
+        """
 
         MPETSc = PETSc.Mat(self.comm)
 
@@ -1536,8 +1728,24 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
 
         # MPETSc.create()
 
-        MPETSc.createAIJ([[nLocalNodes, None], [None, self.getNcp(-1)]], comm=self.comm)
-        MPETSc.setPreallocationNNZ([self.getPrealloc(True), self.getPrealloc(True)])
+        nFields = 1 if is_control else self.getNFields()
+        dim = self.mesh.geometry.dim
+
+        V = self.V_control if is_control else self.V
+        is_scalar = V.num_sub_spaces == 0
+
+        bs = V.dofmap.index_map_bs
+        nLocalFEMNodes = V.dofmap.index_map.size_local * bs
+
+        if is_control:
+            nGlobalIGADofs = self.getNcp(-1)
+        else:
+            nGlobalIGADofs = sum([self.getNcp(i) for i in range(nFields)])
+
+        MPETSc.createAIJ(
+            [[nLocalFEMNodes, None], [None, nGlobalIGADofs]], comm=self.comm)
+        MPETSc.setPreallocationNNZ(
+            [self.getPrealloc(is_control), self.getPrealloc(is_control)])
 
         # just slow down quietly if preallocation is insufficient
         MPETSc.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
@@ -1545,96 +1753,47 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
         # MPETSc.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
         MPETSc.setUp()
 
-        # I indexes FEM nodes owned by this process
-        # for I in xrange(Istart, Iend):
-        dofs = self.V_control.dofmap().dofs()
-        for I in np.arange(0, len(dofs)):
-            x = x_nodes[dofs[I] - Istart]
-            matRow = dofs[I]
-            nodesAndEvals = self.getNodesAndEvals(x, -1)
+        for field in range(0, nFields):
 
-            # cols = array(nodesAndEvals,dtype=INDEX_TYPE)[:,0]
-            # rows = array([matRow,],dtype=INDEX_TYPE)
-            # values = npTranspose(array(nodesAndEvals)[:,1:2])
-            # MPETSc.setValues(rows,cols,values,addv=PETSc.InsertMode.INSERT)
-
-            for i in range(0, len(nodesAndEvals)):
-                if abs(nodesAndEvals[i][1]) > self.getIgnoreEps():
-                    MPETSc[matRow, nodesAndEvals[i][0]] = nodesAndEvals[i][1]
-
-        MPETSc.assemblyBegin()
-        MPETSc.assemblyEnd()
-
-        return dolfin.PETScMatrix(MPETSc)
-
-    def generateM(self):
-        """
-        Generates the extraction matrix for the mixed function space of
-        all unkown scalar fields.
-        """
-
-        func = dolfin.Function(self.V)
-        Istart, Iend = dolfin.as_backend_type(func.vector()).vec().getOwnershipRange()
-        nLocalNodes = Iend - Istart
-
-        totalDofs = 0
-        for i in range(0, self.getNFields()):
-            totalDofs += self.getNcp(i)
-
-        MPETSc = PETSc.Mat(self.comm)
-        # MPETSc.create(PETSc.COMM_WORLD)
-        # arguments: [[localRows,localColumns],[globalRows,globalColums]]
-        # MPETSc.setSizes([[nLocalNodes,None],[None,totalDofs]])
-        MPETSc.createAIJ([[nLocalNodes, None], [None, totalDofs]], comm=self.comm)
-        # MPETSc.setType('aij') # sparse
-        # TODO: maybe change preallocation stuff
-        MPETSc.setPreallocationNNZ([self.getPrealloc(False), self.getPrealloc(False)])
-        # MPETSc.setPreallocationNNZ(0)
-        # just slow down quietly if preallocation is insufficient
-        MPETSc.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
-        # for debug:
-        # MPETSc.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
-        MPETSc.setUp()
-
-        offset = 0
-        for field in range(0, self.getNFields()):
-            x_nodes = self.V.tabulate_dof_coordinates().reshape(
-                (-1, self.mesh.geometry().dim())
-            )
-            if self.getNFields() > 1:
-                dofs = self.V.sub(field).dofmap().dofs()
+            if is_scalar:
+                Vf = V
+                local_range = Vf.dofmap.index_map.local_range
+                fem_dofs_range = range(*local_range)
             else:
-                dofs = self.V.dofmap().dofs()
-            for I in np.arange(0, len(dofs)):
-                x = x_nodes[dofs[I] - Istart]
-                matRow = dofs[I]
-                nodesAndEvals = self.getNodesAndEvals(x, field)
 
-                # Ideally, would use globalDof here for consistency,
-                # but it is not very efficient as implemented
-                # cols = array(nodesAndEvals,dtype=INDEX_TYPE)[:,0] + offset
+                Vf, fem_dofs_range = V.sub(field).collapse()
+                size_local = Vf.dofmap.index_map.size_local
+                fem_dofs_range = np.array(
+                    fem_dofs_range[0:size_local]) + V.dofmap.index_map.local_range[0] * bs
+
+            igaDofsOffset = sum([self.getNcp(i) for i in range(field)])
+
+            x_nodes = Vf.tabulate_dof_coordinates()
+
+            for i, fem_dof in enumerate(fem_dofs_range):
+                x = x_nodes[i, :dim]
+                nodesAndEvals = self.getNodesAndEvals(
+                    x, -1 if is_control else field)
+
+                # cols = array(nodesAndEvals,dtype=INDEX_TYPE)[:,0]
                 # rows = array([matRow,],dtype=INDEX_TYPE)
                 # values = npTranspose(array(nodesAndEvals)[:,1:2])
                 # MPETSc.setValues(rows,cols,values,addv=PETSc.InsertMode.INSERT)
 
-                for i in range(0, len(nodesAndEvals)):
-                    # Ideally, would use globalDof here for consistency,
-                    # but it is not very efficient as implemented
-                    if abs(nodesAndEvals[i][1]) > self.getIgnoreEps():
-                        MPETSc[matRow, nodesAndEvals[i][0] + offset] = nodesAndEvals[i][
-                            1
-                        ]
+                ignore_eps = self.getIgnoreEps()
+                # FIXME: to vectorize
+                for dof_col_local, val in nodesAndEvals:
+                    if abs(val) > ignore_eps:
+                        MPETSc[fem_dof, dof_col_local + igaDofsOffset] = val
 
-            offset += self.getNcp(field)
+        MPETSc.assemble()
 
-        MPETSc.assemblyBegin()
-        MPETSc.assemblyEnd()
-
-        return dolfin.PETScMatrix(MPETSc)
+        return MPETSc
 
     # override default behavior to order unknowns according to what task's
     # FE mesh they overlap.  this will (hopefully) reduce communication
     # cost in the matrix--matrix multiplies
+
     def generatePermutation(self):
         """
         Generates a permutation of the IGA degrees of freedom that tries to
@@ -1643,63 +1802,78 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
         FE mesh.
         """
 
-        func = dolfin.Function(self.V)
-        Istart, Iend = dolfin.as_backend_type(func.vector()).vec().getOwnershipRange()
-        nLocalNodes = Iend - Istart
+        # MPETSc.create(PETSc.COMM_WORLD)
+        # arguments: [[localRows,localColumns],[globalRows,globalColums]]
+        # MPETSc.setSizes([[nLocalNodes,None],[None,self.getNcp(-1)]])
+        # MPETSc.setType('aij') # sparse
 
-        totalDofs = 0
-        for i in range(0, self.getNFields()):
-            totalDofs += self.getNcp(i)
+        # MPETSc.create()
+
+        mpirank = self.comm.rank
+
+        nFields = self.getNFields()
+        dim = self.mesh.geometry.dim
+
+        is_scalar = self.V.num_sub_spaces == 0
+
+        bs = self.V.dofmap.index_map_bs
+        nLocalFEMNodes = self.V.dofmap.index_map.size_local * bs
+
+        nGlobalIGADofs = sum([self.getNcp(i) for i in range(nFields)])
 
         MPETSc = PETSc.Mat(self.comm)
-        MPETSc.createAIJ([[nLocalNodes, None], [None, totalDofs]], comm=self.comm)
-        MPETSc.setPreallocationNNZ([self.getPrealloc(False), self.getPrealloc(False)])
+        MPETSc.createAIJ(
+            [[nLocalFEMNodes, None], [None, nGlobalIGADofs]], comm=self.comm)
+        MPETSc.setPreallocationNNZ(
+            [self.getPrealloc(False), self.getPrealloc(False)])
         MPETSc.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
         MPETSc.setUp()
 
-        offset = 0
-        for field in range(0, self.getNFields()):
-            x_nodes = self.V.tabulate_dof_coordinates().reshape(
-                (-1, self.mesh.geometry().dim())
-            )
-            if self.getNFields() > 1:
-                dofs = self.V.sub(field).dofmap().dofs()
+        for field in range(0, nFields):
+
+            if is_scalar:
+                Vf = self.V
+                local_range = Vf.dofmap.index_map.local_range
+                fem_dofs_range = range(*local_range)
             else:
-                dofs = self.V.dofmap().dofs()
-            for I in np.arange(0, len(dofs)):
-                x = x_nodes[dofs[I] - Istart]
-                matRow = dofs[I]
+
+                Vf, fem_dofs_range = self.V.sub(field).collapse()
+                size_local = Vf.dofmap.index_map.size_local
+                fem_dofs_range = np.array(
+                    fem_dofs_range[0:size_local]) + self.V.dofmap.index_map.local_range[0] * bs
+
+            igaDofsOffset = sum([self.getNcp(i) for i in range(field)])
+
+            x_nodes = Vf.tabulate_dof_coordinates()
+
+            for i, fem_dof in enumerate(fem_dofs_range):
+                x = x_nodes[i, :dim]
                 nodesAndEvals = self.getNodesAndEvals(x, field)
 
-                # cols = array(nodesAndEvals,dtype=INDEX_TYPE)[:,0] + offset
+                # cols = array(nodesAndEvals,dtype=INDEX_TYPE)[:,0]
                 # rows = array([matRow,],dtype=INDEX_TYPE)
-                # values = full((1,len(nodesAndEvals)),mpirank+1)
+                # values = npTranspose(array(nodesAndEvals)[:,1:2])
                 # MPETSc.setValues(rows,cols,values,addv=PETSc.InsertMode.INSERT)
 
-                for i in range(0, len(nodesAndEvals)):
-                    MPETSc[matRow, nodesAndEvals[i][0] + offset] = (
-                        mpirank + 1
-                    )  # need to avoid losing zeros...
+                for dof_col_local, _ in nodesAndEvals:
+                    MPETSc[fem_dof, dof_col_local +
+                           igaDofsOffset] = (mpirank + 1)  # need to avoid losing zeros...
 
-            offset += self.getNcp(field)
-
-        MPETSc.assemblyBegin()
-        MPETSc.assemblyEnd()
+        MPETSc.assemble()
 
         MT = MPETSc.transpose(PETSc.Mat(self.comm))
         Istart, Iend = MT.getOwnershipRange()
         nLocal = Iend - Istart
         partitionInts = np.zeros(nLocal, dtype=INDEX_TYPE)
         for i in np.arange(Istart, Iend):
-            rowValues = MT.getRow(i)[0]
-            # isolate nonzero entries
+            rowValues = MT.getRow(i)[1]
+            # isolate nonzero entries (likely not needed ?)
             rowValues = np.extract(rowValues > 0, rowValues)
+            if rowValues.size == 0:
+                continue
             iLocal = i - Istart
             modeValues = sp.stats.mode(rowValues)[0]
-            if len(modeValues) > 0:
-                partitionInts[iLocal] = int(sp.stats.mode(rowValues).mode[0] - 0.5)
-            else:
-                partitionInts[iLocal] = 0  # necessary?
+            partitionInts[iLocal] = int(modeValues - 0.5)
         partitionIS = PETSc.IS(self.comm)
         partitionIS.createGeneral(partitionInts, comm=self.comm)
 
@@ -1707,7 +1881,8 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
 
         # all-gather the partition indices and apply argsort to their
         # underlying arrays
-        bigIndices = np.argsort(partitionIS.allGather().getIndices()).astype(INDEX_TYPE)
+        bigIndices = np.argsort(
+            partitionIS.allGather().getIndices()).astype(INDEX_TYPE)
 
         # note: index set sort method only sorts locally on each processor
 
@@ -1734,7 +1909,7 @@ class AbstractScalarBasis(object):
 
     __metaclass__ = abc.ABCMeta
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getNodesAndEvals(self, xi):
         """
         Given a parametric point ``xi``, return a list of the form
@@ -1745,14 +1920,14 @@ class AbstractScalarBasis(object):
         """
         return
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getNcp(self):
         """
         Returns the total number of basis functions.
         """
         return
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def generateMesh(self, comm=worldcomm):
         """
         Generates and returns an FE mesh sufficient for extracting this spline
@@ -1761,7 +1936,7 @@ class AbstractScalarBasis(object):
         """
         return
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getDegree(self):
         """
         Returns a polynomial degree for FEs that is sufficient for extracting
@@ -1784,14 +1959,6 @@ class AbstractScalarBasis(object):
         discontinuous).
         """
         return True
-
-    @abc.abstractmethod
-    def useRectangularElements(self):
-        """
-        Returns a Boolean indicating whether or not rectangular (i.e., quad
-        or hex) elements should be used for extraction of this basis.
-        """
-        return
 
     # @abc.abstractmethod
     # def getParametricDimension(self):
@@ -1822,7 +1989,7 @@ class AbstractControlMesh(object):
 
     __metaclass__ = abc.ABCMeta
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getHomogeneousCoordinate(self, node, direction):
         """
         Returns the ``direction``-th homogeneous component of the control
@@ -1830,7 +1997,7 @@ class AbstractControlMesh(object):
         """
         return
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getScalarSpline(self):
         """
         Returns the instance of ``AbstractScalarBasis`` that represents
@@ -1838,7 +2005,7 @@ class AbstractControlMesh(object):
         """
         return
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getNsd(self):
         """
         Returns the dimension of physical space.
@@ -1858,7 +2025,7 @@ class AbstractMultiFieldSpline(AbstractCoordinateChartSpline):
 
     __metaclass__ = abc.ABCMeta
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getControlMesh(self):
         """
         Returns some object implementing ``AbstractControlMesh``, that
@@ -1866,7 +2033,7 @@ class AbstractMultiFieldSpline(AbstractCoordinateChartSpline):
         """
         return
 
-    @abc.abstractmethod
+    @ abc.abstractmethod
     def getFieldSpline(self, field):
         """
         Returns the ``field``-th unknown scalar field's
@@ -1892,7 +2059,7 @@ class AbstractMultiFieldSpline(AbstractCoordinateChartSpline):
     def getScalarSpline(self, field):
         """
         Returns the ``field``-th unknown scalar field's \
-        ``AbstractScalarBasis``, or, if ``field==-1``, the 
+        ``AbstractScalarBasis``, or, if ``field==-1``, the
         basis for the scalar space of the control mesh.
         """
         if field == -1:
@@ -1984,21 +2151,19 @@ class EqualOrderSpline(AbstractMultiFieldSpline):
         """
 
         # this is prior to the permutation
-        Istart, Iend = self.M_control.mat().getOwnershipRangeColumn()
+        Istart, Iend = self.M_control.getOwnershipRangeColumn()
         nsd = self.getNsd()
         # since this checks every single control point, it needs to
         # be scalable
+        p = np.zeros(nsd + 1)
         for I in np.arange(Istart, Iend):
-            p = np.zeros(nsd + 1)
             for j in np.arange(0, nsd + 1):
                 p[j] = self.getHomogeneousCoordinate(I, j)
             for j in np.arange(0, nsd):
                 p[j] /= p[nsd]
             # make it strictly based on location, regardless of how the
             # on_boundary argument is handled
-            isInside = subdomain.inside(p[0:nsd], False) or subdomain.inside(
-                p[0:nsd], True
-            )
+            isInside = subdomain(p[0:nsd], False) or subdomain(p[0:nsd], True)
             if isInside:
                 self.zeroDofs += [
                     self.globalDof(field, I),

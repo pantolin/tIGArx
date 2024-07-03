@@ -6,12 +6,13 @@ This example uses the simplest IGA discretization, namely, explicit B-splines
 in which parametric and physical space are the same.
 """
 
-from tIGAr.common import mpirank, EqualOrderSpline, ExtractedSpline
-from tIGAr.BSplines import ExplicitBSplineControlMesh, uniformKnots
+from tIGArx.common import mpirank, EqualOrderSpline, ExtractedSpline
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
 
-import dolfin
+import dolfinx
 import ufl
 
+from mpi4py import MPI
 import numpy as np
 
 # Number of levels of refinement with which to run the Poisson problem.
@@ -46,13 +47,16 @@ for level in range(0, N_LEVELS):
 
     # Create a control mesh for which $\Omega = \widehat{\Omega}$.
     splineMesh = ExplicitBSplineControlMesh(
-        [p, q], [uniformKnots(p, x0, x0 + Lx, NELu), uniformKnots(q, y0, y0 + Ly, NELv)]
+        [p, q], [uniformKnots(p, x0, x0 + Lx, NELu),
+                 uniformKnots(q, y0, y0 + Ly, NELv)]
     )
 
     # Create a spline generator for a spline with a single scalar field on the
     # given control mesh, where the scalar field is the same as the one used
     # to determine the mapping $\mathbf{F}:\widehat{\Omega}\to\Omega$.
+    # FIXME
     splineGenerator = EqualOrderSpline(1, splineMesh)
+    # splineGenerator = EqualOrderSpline(2, splineMesh)
 
     # Set Dirichlet boundary conditions on the 0-th (and only) field, on both
     # ends of the domain, in both directions.
@@ -70,15 +74,15 @@ for level in range(0, N_LEVELS):
     # control points.)
 
     # field = 0
-    # class BdryDomain(SubDomain):
-    #    def inside(self,x,on_boundary):
-    #        return (near(x[0],x0) or near(x[0],x0+Lx)
-    #                or near(x[1],y0) or near(x[1],y0+Ly))
-    # splineGenerator.addZeroDofsByLocation(BdryDomain(),field)
+    # def get_boundary(x, on_boundary):
+    #     return (near(x[0],x0) or near(x[0],x0+Lx)
+    #             or near(x[1],y0) or near(x[1],y0+Ly))
+    # splineGenerator.addZeroDofsByLocation(get_boundary(),field)
 
     # Write extraction data to the filesystem.
     DIR = "./extraction"
-    splineGenerator.writeExtraction(DIR)
+    # FIXME to uncomment.
+    # splineGenerator.writeExtraction(DIR)
 
     ####### Analysis #######
 
@@ -94,6 +98,7 @@ for level in range(0, N_LEVELS):
     # As of version 2019.1, this is required for using quad/hex elements in
     # parallel.
     spline = ExtractedSpline(splineGenerator, QUAD_DEG)
+    # spline = ExtractedSpline(DIR, QUAD_DEG)
 
     # Alternative: Can read the extracted spline back in from the filesystem.
     # For quad/hex elements, in version 2019.1, this only works in serial.
@@ -106,30 +111,37 @@ for level in range(0, N_LEVELS):
     # Homogeneous coordinate representation of the trial function u.  Because
     # weights are 1 in the B-spline case, this can be used directly in the PDE,
     # without dividing through by weight.
-    u = dolfin.TrialFunction(spline.V)
+    u = ufl.TrialFunction(spline.V)
 
     # Corresponding test function.
-    v = dolfin.TestFunction(spline.V)
+    v = ufl.TestFunction(spline.V)
 
     # Create a force, f, to manufacture the solution, soln
     x = spline.spatialCoordinates()
-    soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * ufl.sin(ufl.pi * (x[1] - y0) / Ly)
+    soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * \
+        ufl.sin(ufl.pi * (x[1] - y0) / Ly)
     f = -spline.div(spline.grad(soln))
 
     # Set up and solve the Poisson problem
     a = ufl.inner(spline.grad(u), spline.grad(v)) * spline.dx
     L = ufl.inner(f, v) * spline.dx
-    u = dolfin.Function(spline.V)
+    u = dolfinx.fem.Function(spline.V)
+    u.name = "u"
     spline.solveLinearVariationalProblem(a == L, u)
 
     ####### Postprocessing #######
 
     # The solution, u, is in the homogeneous representation, but, again, for
     # B-splines with weight=1, this is the same as the physical representation.
-    dolfin.File("results/u.pvd") << u
+    with dolfinx.io.VTXWriter(spline.mesh.comm, "results/u.bp", [u]) as vtx:
+        vtx.write(0.0)
 
     # Compute and print the $L^2$ error in the discrete solution.
-    L2_error = np.sqrt(dolfin.assemble(((u - soln) ** 2) * spline.dx))
+    L2_error_local = dolfinx.fem.assemble_scalar(
+        dolfinx.fem.form(((u - soln) ** 2) * spline.dx))
+    comm = spline.comm
+    L2_error = np.sqrt(comm.allreduce(L2_error_local, op=MPI.SUM))
+
     L2_errors[level] = L2_error
     if level > 0:
         rate = np.log(L2_errors[level - 1] / L2_errors[level]) / np.log(2.0)

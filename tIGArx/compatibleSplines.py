@@ -10,18 +10,20 @@ These spline spaces may be used with B-spline or NURBS control meshes to
 define the geometrical mapping from parametric to physical space.
 """
 
-from tIGAr.common import AbstractMultiFieldSpline, ExtractedSpline, mpirank
-from tIGAr.BSplines import BSpline
-from tIGAr.calculusUtils import cartesianPushforwardRT, cartesianPushforwardN
+from tIGArx.common import AbstractMultiFieldSpline, ExtractedSpline, mpirank
+from tIGArx.BSplines import BSpline
+from tIGArx.calculusUtils import cartesianPushforwardRT, cartesianPushforwardN
 
-import dolfin
+import dolfinx
 import ufl
+
+from petsc4py import PETSc
 
 import copy
 import numpy as np
 import sys
 
-DEFAULT_RT_PENALTY = dolfin.Constant(1e1)
+DEFAULT_RT_PENALTY = 1.0e1
 
 
 def generateFieldsCompat(controlMesh, RTorN, degrees, periodicities=None):
@@ -42,7 +44,6 @@ def generateFieldsCompat(controlMesh, RTorN, degrees, periodicities=None):
     """
 
     nvar = len(degrees)
-    useRect = controlMesh.getScalarSpline().useRectangularElements()
     fields = []
     # i indexes parametric components of the velocity (i.e., scalar fields)
     for i in range(0, nvar):
@@ -58,7 +59,8 @@ def generateFieldsCompat(controlMesh, RTorN, degrees, periodicities=None):
                 degree += 1
             # ASSUMES that the underlying scalar spline of the control mesh
             # is a BSpline, and re-uses unique knots
-            knots = copy.copy(controlMesh.getScalarSpline().splines[j].uniqueKnots)
+            knots = copy.copy(
+                controlMesh.getScalarSpline().splines[j].uniqueKnots)
             # use open knot vector by default or if non-periodic
             if periodicities == None or (not periodicities[j]):
                 for k in range(0, degree):
@@ -84,7 +86,7 @@ def generateFieldsCompat(controlMesh, RTorN, degrees, periodicities=None):
                 degree,
             ]
         fields += [
-            BSpline(scalarDegrees, knotVectors, useRect),
+            BSpline(scalarDegrees, knotVectors),
         ]
     return fields
 
@@ -178,20 +180,22 @@ def iteratedDivFreeSolve(
         # div on deformed splines, because the Piola transform is
         # div-conserving, but the penalty may not control the physical
         # divergence evenly on nonuniform meshes.
-        divOp = lambda u_hat: spline.div(cartesianPushforwardRT(u_hat, spline.F))
+        def divOp(u_hat): return spline.div(
+            cartesianPushforwardRT(u_hat, spline.F))
 
     # augmented problem
     if w == None:
-        w = dolfin.Function(spline.V)
+        w = dolfinx.fem.Function(spline.V)
 
     augmentation = (
-        penalty * divOp(u) * divOp(v) * spline.dx + divOp(w) * divOp(v) * spline.dx
+        penalty * divOp(u) * divOp(v) * spline.dx +
+        divOp(w) * divOp(v) * spline.dx
     )
     residualFormAug = residualForm + augmentation
     if J == None:
-        JAug = dolfin.derivative(residualFormAug, u)
+        JAug = ufl.derivative(residualFormAug, u)
     else:
-        JAug = J + dolfin.derivative(augmentation, u)
+        JAug = J + ufl.derivative(augmentation, u)
 
     # TODO: Think more about implementing separate tolerances for
     # momentum and continuity residuals.
@@ -202,25 +206,29 @@ def iteratedDivFreeSolve(
         if i == 0 or (not reuseLHS):
             MTAM = spline.assembleMatrix(JAug, applyBCs=applyBCs)
 
-        currentNorm = dolfin.norm(MTb)
+        currentNorm = MTb.norm(PETSc.NormType.NORM_2)
         if i == 0:
             initialNorm = currentNorm
         relativeNorm = currentNorm / initialNorm
         if mpirank == 0:
             print(
-                "Solver iteration: " + str(i) + " , Relative norm: " + str(relativeNorm)
+                "Solver iteration: " +
+                str(i) + " , Relative norm: " + str(relativeNorm)
             )
             sys.stdout.flush()
         if currentNorm / initialNorm < spline.relativeTolerance:
             converged = True
             break
-        du = dolfin.Function(spline.V)
+        du = dolfinx.fem.Function(spline.V)
         # du.assign(Constant(0.0)*du)
         spline.solveLinearSystem(MTAM, MTb, du)
-        # as_backend_type(u.vector()).vec().assemble()
-        # as_backend_type(du.vector()).vec().assemble()
-        u.assign(u - du)
-        w.assign(w + penalty * u)
+        # u.vector.assemble()
+        # du.vector.assemble()
+        u.x.array[:] = u.x.array - du.x.array
+        w.x.array[:] = w.x.array + penalty * u.x.array
+        # FIXME are these scatter really needed?
+        u.x.scatter_forward()
+        w.x.scatter_forward()
     if not converged:
         print("ERROR: Iterated penalty solver failed to converge.")
         exit()
@@ -253,8 +261,8 @@ def divFreeProject(
     ``applyBCs`` indicates whether or not to apply Dirichlet boundary
     conditions.
     """
-    u_hat = dolfin.Function(spline.V)
-    v_hat = dolfin.TestFunction(spline.V)
+    u_hat = dolfinx.fem.Function(spline.V)
+    v_hat = ufl.TestFunction(spline.V)
     u = cartesianPushforwardRT(getVelocity(u_hat), spline.F)
     v = cartesianPushforwardRT(getVelocity(v_hat), spline.F)
     res = ufl.inner(u - toProject, v) * spline.dx
@@ -338,11 +346,11 @@ class ExtractedBSplineN(ExtractedSpline):
         NOTE:  This is technically un-determined up to a gradient, but
         some iterative solvers can still usually pick a solution.
         """
-        Ahat = dolfin.TrialFunction(self.V)
-        Bhat = dolfin.TestFunction(self.V)
+        Ahat = ufl.TrialFunction(self.V)
+        Bhat = ufl.TestFunction(self.V)
         u = self.curl(self.pushforward(Ahat))
         v = self.curl(self.pushforward(Bhat))
         res = ufl.inner(u - toProject, v) * self.dx
-        retval = dolfin.Function(self.V)
+        retval = dolfinx.fem.Function(self.V)
         self.solveLinearVariationalProblem(res, retval, applyBCs)
         return retval

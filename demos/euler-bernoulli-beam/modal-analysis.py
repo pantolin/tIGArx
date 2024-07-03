@@ -1,20 +1,30 @@
 """
-Solve and plot several modes of the cantilevered Euler--Bernoulli beam, 
-using a pure displacement formulation, which would not be possible with 
-standard $C^0$ finite elements.  
+Solve and plot several modes of the cantilevered Euler--Bernoulli beam,
+using a pure displacement formulation, which would not be possible with
+standard $C^0$ finite elements.
 
 Note: This demo uses interactive plotting, which may cause errors on systems
-without GUIs.  
+without GUIs.
 """
 
-from tIGAr.common import EqualOrderSpline, ExtractedSpline
-from tIGAr.BSplines import ExplicitBSplineControlMesh, uniformKnots
+from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpisize
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
 
-import dolfin
+import dolfinx
+from dolfinx import default_real_type
 import ufl
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+from petsc4py import PETSc
+from slepc4py import SLEPc
+
+if mpisize > 1:
+    print("ERROR: This demo only works in serial. "
+          "SLEPc fails in parallel. Possibly related to "
+          "https://slepc.upv.es/documentation/faq.htm#faq10 ?")
+    exit()
 
 
 ####### Preprocessing #######
@@ -55,8 +65,8 @@ QUAD_DEG = 2 * p
 spline = ExtractedSpline(splineGenerator, QUAD_DEG)
 
 # Displacement test and trial functions:
-u = dolfin.TrialFunction(spline.V)
-v = dolfin.TestFunction(spline.V)
+u = ufl.TrialFunction(spline.V)
+v = ufl.TestFunction(spline.V)
 
 
 # Laplace operator:
@@ -65,9 +75,9 @@ def lap(f):
 
 
 # Material constants for the Euler--Bernoulli beam problem:
-E = dolfin.Constant(1.0)
-I = dolfin.Constant(1.0)
-mu = dolfin.Constant(1.0)
+E = 1.0
+I = 1.0
+mu = 1.0
 
 # Elasticity form:
 a = ufl.inner(E * I * lap(u), lap(v)) * spline.dx
@@ -79,29 +89,74 @@ b = mu * ufl.inner(u, v) * spline.dx
 # the diagonal entries for A corresponding to Dirichlet BCs are set to a
 # large value is to shift the corresponding eigenmodes to the high end of
 # the frequency spectrum.
-A = spline.assembleMatrix(a, diag=1.0 / dolfin.DOLFIN_EPS)
+A = spline.assembleMatrix(a, diag=1.0 / np.finfo(default_real_type).eps)
 B = spline.assembleMatrix(b)
 
 # Solve the eigenvalue problem, ordering values from smallest to largest in
 # magnitude.
-solver = dolfin.SLEPcEigenSolver(A, B)
-solver.parameters["spectrum"] = "smallest magnitude"
-solver.solve()
+
+comm = spline.mesh.comm
+mpi_rank = comm.Get_rank()
+
+N_MODES = 5
+
+opts = PETSc.Options()
+opts.setValue("eps_target_magnitude", None)
+opts.setValue("eps_target", 0)
+opts.setValue("st_type", "sinvert")
+
+eig_solver = SLEPc.EPS().create(comm)
+eig_solver.setDimensions(N_MODES)
+eig_solver.setOperators(A, B)
+eig_solver.setProblemType(SLEPc.EPS.ProblemType.GHEP)
+eig_solver.setFromOptions()
+eig_solver.solve()
+
+assert N_MODES < eig_solver.getConverged()
+
+if mpi_rank == 0:
+    its = eig_solver.getIterationNumber()
+    print("Number of iterations of the method: %d" % its)
+
+    eps_type = eig_solver.getType()
+    print("Solution method: %s" % eps_type)
+
+    nev, ncv, mpd = eig_solver.getDimensions()
+    print("Number of requested eigenvalues: %d" % nev)
+
+    tol, maxit = eig_solver.getTolerances()
+    print("Stopping condition: tol=%.4g, maxit=%d" % (tol, maxit))
+
+size_local = spline.V.dofmap.index_map.size_local
+x = spline.V.tabulate_dof_coordinates()[:size_local, 0]
+x_global = comm.gather(x, root=0)
+if mpi_rank == 0:
+    x_global = np.concatenate(x_global)
+    ind = np.argsort(x_global)
+    x_global = x_global[ind]
+
 
 # Look at the first N_MODES modes of the problem.
-N_MODES = 5
 for n in range(0, N_MODES):
     # Due to the structure of the problem, we know that the eigenvalues are
     # real, so we are passing the dummy placeholder _ for the complex parts
     # of the eigenvalue and mode.
-    omega2, _, uVectorIGA, _ = solver.get_eigenpair(n)
-    print("omega_" + str(n) + " = " + str(np.sqrt(omega2)))
+
+    uVectorIGA = A.getVecLeft()
+    omega2 = eig_solver.getEigenpair(n, Vr=uVectorIGA)
+    if mpi_rank == 0:
+        print("omega_" + str(n) + " = " + str(np.sqrt(omega2)))
 
     # The solution from the eigensolver is a vector of IGA DoFs, and must be
     # extracted back to an FE representation for plotting.
-    u = dolfin.Function(spline.V)
-    u.vector()[:] = spline.M * uVectorIGA
-    dolfin.plot(u)
+    u = spline.M * uVectorIGA
 
-plt.autoscale()
-plt.show()
+    u_global = comm.gather(u.array_r, root=0)
+
+    if mpi_rank == 0:
+        u_global = np.concatenate(u_global)[ind]
+        plt.plot(x_global, u_global)
+
+if mpi_rank == 0:
+    plt.autoscale()
+    plt.show()

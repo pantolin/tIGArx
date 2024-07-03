@@ -1,6 +1,6 @@
-# tIGAr
+# tIGArx
 
-A Python library for isogeometric analysis (IGA) using FEniCS.  The following article outlines the design of tIGAr:
+A Python library for isogeometric analysis (IGA) using FEniCS.  The following article outlines the design of tIGArx:
 ```
 @article{Kamensky2019,
 title = "{tIGAr}: Automating isogeometric analysis with {FEniCS}",
@@ -23,14 +23,14 @@ author = "D. Kamensky and Y. Bazilevs"
 
 ## Installation
 
-Install all dependencies, clone the repository (or download and extract from an archive), and append the top-level directory of the repository (viz. the one with subdirectories `tIGAr`, `docs`, etc.) to the environment variable `PYTHONPATH`, e.g., by adding
+Install all dependencies, clone the repository (or download and extract from an archive), and append the top-level directory of the repository (viz. the one with subdirectories `tIGArx`, `docs`, etc.) to the environment variable `PYTHONPATH`, e.g., by adding
 ```bash
 export PYTHONPATH=/path/to/repository/:$PYTHONPATH
 ```
 to your `~/.bashrc` file (and `source`-ing it).  To (optionally) build the API documentation, change directory to `docs` and type `make html`. The main documentation will then be in `./_build/html/index.html`, which can be opened with a web browser.  
 
 ### On clusters
-The most convenient way to use FEniCS (and therefore tIGAr) on HPC clusters is via [Singularity](https://sylabs.io/singularity/).  A singularity recipe for using tIGAr is in the file `singularity-recipe.def`.  Some additional notes are provided in the comments of that file.  
+The most convenient way to use FEniCS (and therefore tIGArx) on HPC clusters is via [Singularity](https://sylabs.io/singularity/).  A singularity recipe for using tIGArx is in the file `singularity-recipe.def`.  Some additional notes are provided in the comments of that file.  
 
 ### Common installation issues
 * `petsc4py.PETSc.Mat object has no attribute PtAP`: This is due to an old version of `petsc4py`.  Try installing the latest version via `pip3`.

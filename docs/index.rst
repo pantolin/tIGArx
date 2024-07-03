@@ -1,36 +1,36 @@
-.. tIGAr documentation master file, created by
+.. tIGArx documentation master file, created by
    sphinx-quickstart on Mon Mar  5 16:29:16 2018.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-``tIGAr`` API documentation
+``tIGArx`` API documentation
 ===========================
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
-This document contains detailed information about the usage of functions, classes, and methods in the different modules of ``tIGAr``.  Please refer to the documented demos for higher-level discussion and examples.
+This document contains detailed information about the usage of functions, classes, and methods in the different modules of ``tIGArx``.  Please refer to the documented demos for higher-level discussion and examples.
 
-.. automodule:: tIGAr.common
+.. automodule:: tIGArx.common
 	       :members:
 
-.. automodule:: tIGAr.BSplines
+.. automodule:: tIGArx.BSplines
 	       :members:
 
-.. automodule:: tIGAr.NURBS
+.. automodule:: tIGArx.NURBS
 	       :members:
 
-.. automodule:: tIGAr.RhinoTSplines
+.. automodule:: tIGArx.RhinoTSplines
 	       :members:
 
-.. automodule:: tIGAr.compatibleSplines
+.. automodule:: tIGArx.compatibleSplines
 		:members:
 		  
-.. automodule:: tIGAr.calculusUtils
+.. automodule:: tIGArx.calculusUtils
 	       :members:
 
-.. automodule:: tIGAr.timeIntegration
+.. automodule:: tIGArx.timeIntegration
 	       :members:
 
 		  

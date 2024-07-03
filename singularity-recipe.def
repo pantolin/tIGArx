@@ -3,9 +3,9 @@ From: quay.io/fenicsproject/stable:current
 
 ####### Notes #######
 #
-# This is a Singularity recipe that adds TSFC, tIGAr, and igakit to a
+# This is a Singularity recipe that adds TSFC, tIGArx, and igakit to a
 # Docker container with the current stable version of FEniCS.  (TSFC is not
-# strictly required for tIGAr, but may be useful for some complicated
+# strictly required for tIGArx, but may be useful for some complicated
 # variational forms.)
 #
 # To build an image from this recipe, use the following command (on a
@@ -28,6 +28,6 @@ From: quay.io/fenicsproject/stable:current
     pip3 install git+https://github.com/blechta/COFFEE.git@2018.1.0
     pip3 install git+https://github.com/blechta/FInAT.git@2018.1.0
     pip3 install singledispatch networkx pulp
-    pip3 install git+https://github.com/david-kamensky/tIGAr.git
+    pip3 install git+https://github.com/pantolin/tIGArx.git
     pip3 install git+https://github.com/dalcinl/igakit.git
     pip3 install --force-reinstall scipy

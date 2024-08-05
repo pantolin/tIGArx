@@ -8,20 +8,21 @@ is the PhD thesis of J.A. Evans:
 
 This demo uses NURBS to describe a distorted mesh.
 """
-
-from tIGArx.common import mpirank, worldcomm
-from tIGArx.NURBS import NURBSControlMesh
-from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
-
-from igakit.nurbs import NURBS as NURBS_ik
-from igakit.io import PetIGA
-
+import numpy as np
 import dolfinx
 import ufl
 
 from mpi4py import MPI
-import numpy as np
+
+from igakit.nurbs import NURBS as NURBS_ik
+from igakit.io import PetIGA
+
+from tIGArx.common import mpirank, worldcomm
+from tIGArx.NURBS import NURBSControlMesh
+
+from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
+from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
+
 
 ####### Geometry creation #######
 

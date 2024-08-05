@@ -6,48 +6,56 @@ that can be used to generate simple sets of extraction data for
 rectangular domains.
 """
 
-from tIGArx.common import (
-    AbstractScalarBasis,
-    AbstractControlMesh,
-    INDEX_TYPE,
-    worldcomm,
-)
+import math
+
+import numpy as np
+import numba as nb
 
 import dolfinx
 from dolfinx import default_real_type
 
-import numpy as np
-import numba as nb
-import math
+from tIGArx.common import INDEX_TYPE, worldcomm
+from tIGArx.SplineInterface import AbstractScalarBasis, AbstractControlMesh
 
 
-def uniformKnots(p, start, end, N, periodic=False, continuityDrop=0):
+def uniform_knots(p, start, end, n_elem, periodic=False, continuity_drop=0):
     """
     Helper function to generate a uniform open knot vector of degree ``p`` with
-    ``N`` elements.  If ``periodic``, end knots are not repeated.
+    ``n_elem`` elements.  If ``periodic``, end knots are not repeated.
     Otherwise, they are repeated ``p+1`` times for an open knot vector.
     Optionally, a drop in continuity can be set through the parameter
     ``continuityDrop`` (i.e., interior knots would have multiplicity
     ``continuityDrop+1``).  Negative continuity (i.e., a discontinuous
     B-spline) is not supported, so ``continuityDrop`` must be less than ``p``.
+
+    Args:
+        p: int, Polynomial degree
+        start: float, Start of domain
+        end: float, End of domain
+        n_elem: int, Number of elements
+        periodic: bool, Periodic knot vector
+        continuity_drop: int, Continuity drop
+
+    Returns:
+        k_vec: numpy array of floats
     """
-    if continuityDrop >= p:
+    if continuity_drop >= p:
         print("ERROR: Continuity drop too high for spline degree.")
         exit()
     retval = []
     if not periodic:
-        for i in range(0, p - continuityDrop):
+        for i in range(0, p - continuity_drop):
             retval += [
                 start,
             ]
-    h = (end - start) / float(N)
-    for i in range(0, N + 1):
-        for j in range(0, continuityDrop + 1):
+    h = (end - start) / float(n_elem)
+    for i in range(0, n_elem + 1):
+        for j in range(0, continuity_drop + 1):
             retval += [
                 start + float(i) * h,
             ]
     if not periodic:
-        for i in range(0, p - continuityDrop):
+        for i in range(0, p - continuity_drop):
             retval += [
                 end,
             ]
@@ -213,7 +221,7 @@ PYBIND11_MODULE(SIGNATURE, m)
 #     basisFuncsCXXString)
 
 
-# function to eval B-spline basis functions (for internal use)
+@nb.njit    # function to eval B-spline basis functions (for internal use)
 def basisFuncsInner(ghostKnots, nGhost, u, pl, i, ndu, left, right, ders):
 
     # TODO: Fix C++ module for 2018.1, and restore this (or equivalent)
@@ -224,6 +232,7 @@ def basisFuncsInner(ghostKnots, nGhost, u, pl, i, ndu, left, right, ders):
     #                                    left,right,ders)
 
     # FIXME -- start: Probably the simplest is to use numba here.
+    # TODO: Check if numba is good enough.
     # basisFuncsCXXModule.basisFuncsInner(
     #     ghostKnots, nGhost, u, pl, i, ndu.flatten(), left, right, ders
     # )
@@ -268,15 +277,15 @@ class BSpline1(object):
         self.uniqueKnots = np.zeros(self.nel + 1)
         self.multiplicities = np.zeros(self.nel + 1, dtype=INDEX_TYPE)
         ct = -1
-        lastKnot = None
+        last_knot = None
         for i in range(0, len(self.knots)):
-            if lastKnot == None or (
+            if last_knot is None or (
                 not math.isclose(
-                    self.knots[i], lastKnot, abs_tol=KNOT_NEAR_EPS, rel_tol=0.0)
+                    self.knots[i], last_knot, abs_tol=KNOT_NEAR_EPS, rel_tol=0.0)
             ):
                 ct += 1
                 self.uniqueKnots[ct] = knots[i]
-            lastKnot = knots[i]
+            last_knot = knots[i]
             self.multiplicities[ct] += 1
         self.ncp = self.computeNcp()
 

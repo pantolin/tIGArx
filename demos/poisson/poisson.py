@@ -7,14 +7,18 @@ in which parametric and physical space are the same.
 """
 import time
 
-from tIGArx.common import mpirank, EqualOrderSpline, ExtractedSpline
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
-
+import numpy as np
 import dolfinx
 import ufl
 
 from mpi4py import MPI
-import numpy as np
+
+from tIGArx.common import mpirank
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+
+from tIGArx.ExtractedSpline import ExtractedSpline
+from tIGArx.MultiFieldSplines import EqualOrderSpline
+
 
 # Number of levels of refinement with which to run the Poisson problem.
 # (Note: Paraview output files will correspond to the last/highest level
@@ -52,8 +56,8 @@ for level in range(0, N_LEVELS):
 
     # Create a control mesh for which $\Omega = \widehat{\Omega}$.
     splineMesh = ExplicitBSplineControlMesh(
-        [p, q], [uniformKnots(p, x0, x0 + Lx, NELu),
-                 uniformKnots(q, y0, y0 + Ly, NELv)]
+        [p, q], [uniform_knots(p, x0, x0 + Lx, NELu),
+                 uniform_knots(q, y0, y0 + Ly, NELv)]
     )
 
     if mpirank == 0:

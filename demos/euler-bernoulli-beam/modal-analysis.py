@@ -6,19 +6,21 @@ standard $C^0$ finite elements.
 Note: This demo uses interactive plotting, which may cause errors on systems
 without GUIs.
 """
-
-from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpisize
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
-
-import dolfinx
-from dolfinx import default_real_type
-import ufl
-
 import numpy as np
 import matplotlib.pyplot as plt
 
 from petsc4py import PETSc
 from slepc4py import SLEPc
+
+from dolfinx import default_real_type
+import ufl
+
+from tIGArx.common import mpisize
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+
+from tIGArx.ExtractedSpline import ExtractedSpline
+from tIGArx.MultiFieldSplines import EqualOrderSpline
+
 
 if mpisize > 1:
     print("ERROR: This demo only works in serial. "
@@ -45,7 +47,7 @@ splineMesh = ExplicitBSplineControlMesh(
         p,
     ],
     [
-        uniformKnots(p, 0.0, L, Nel),
+        uniform_knots(p, 0.0, L, Nel),
     ],
 )
 splineGenerator = EqualOrderSpline(1, splineMesh)

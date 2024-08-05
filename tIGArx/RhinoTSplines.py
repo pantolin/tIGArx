@@ -11,7 +11,7 @@ from tIGArx.BSplines import (
     AbstractControlMesh,
     worldcomm,
 )
-from tIGArx.common import generateMeshXMLFileName
+from tIGArx.utils import generateMeshXMLFileName
 from dolfinx import default_real_type
 
 import dolfinx

@@ -29,18 +29,22 @@ The implementation here relies on a number of seemingly-fragile assumptions
 regarding the ordering of DoFs in mixed function spaces, as pointed out in
 the comments; we invite any suggestions for more robust indexing schemes.
 """
-
-
-from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank, mpisize
-from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
-
-import dolfinx
-import ufl
-from petsc4py import PETSc
+import os.path
 
 import scipy as sp
 import numpy as np
-import os.path
+
+import dolfinx
+import ufl
+
+from petsc4py import PETSc
+
+from tIGArx.common import mpirank, mpisize
+from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
+
+from tIGArx.ExtractedSpline import ExtractedSpline
+from tIGArx.MultiFieldSplines import EqualOrderSpline
+
 
 if mpisize > 1:
     print("ERROR: This demo only works in serial.")

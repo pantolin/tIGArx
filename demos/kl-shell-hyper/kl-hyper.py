@@ -14,14 +14,17 @@ Note: Due to the algebraic complexity of the formulation, the form
 compilation in this example takes *much* longer than it does for typical 
 forms. 
 """
+import dolfinx
+import ufl
 
-from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
+from tIGArx.common import mpirank
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+
 from tIGArx.calculusUtils import getQuadRuleInterval
 from tIGArx.timeIntegration import LoadStepper
 
-import dolfinx
-import ufl
+from tIGArx.ExtractedSpline import ExtractedSpline
+from tIGArx.MultiFieldSplines import EqualOrderSpline
 
 
 ####### Preprocessing #######
@@ -37,8 +40,8 @@ NELv = 10
 degs = [2, 2]
 
 # Generate open knot vectors for each direction.
-kvecs = [uniformKnots(degs[0], -1.0, 1.0, NELu),
-         uniformKnots(degs[1], -1.0, 1.0, NELv)]
+kvecs = [uniform_knots(degs[0], -1.0, 1.0, NELu),
+         uniform_knots(degs[1], -1.0, 1.0, NELv)]
 
 # Generate an explicit B-spline control mesh.  The argument extraDim allows
 # for increasing the dimension of physical space beyond that of parametric

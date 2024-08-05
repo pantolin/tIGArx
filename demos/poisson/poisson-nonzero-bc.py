@@ -4,15 +4,19 @@ Dirichlet boundary conditions (BCs), but this is sufficient to implement
 inhomogeneous (nonzero) BCs relatively easily. This demo modifies the basic
 Poisson equation example to enforce inhomogeneous Dirichlet BCs.
 """
-
-from tIGArx.common import mpirank, EqualOrderSpline, ExtractedSpline
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
+import numpy as np
 
 import dolfinx
 import ufl
 
 from mpi4py import MPI
-import numpy as np
+
+from tIGArx.common import mpirank
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+
+from tIGArx.ExtractedSpline import ExtractedSpline
+from tIGArx.MultiFieldSplines import EqualOrderSpline
+
 
 # Number of levels of refinement with which to run the Poisson problem:
 N_LEVELS = 3
@@ -44,8 +48,8 @@ for level in range(0, N_LEVELS):
 
     # Create a control mesh for which $\Omega = \widehat{\Omega}$.
     splineMesh = ExplicitBSplineControlMesh(
-        [p, q], [uniformKnots(p, x0, x0 + Lx, NELu),
-                 uniformKnots(q, y0, y0 + Ly, NELv)]
+        [p, q], [uniform_knots(p, x0, x0 + Lx, NELu),
+                 uniform_knots(q, y0, y0 + Ly, NELv)]
     )
 
     # Create a spline generator for a spline with a single scalar field on the

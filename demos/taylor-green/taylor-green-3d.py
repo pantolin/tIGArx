@@ -10,18 +10,16 @@ Note: Due to the use of explicit B-splines, more efficient assembly is possible
 by neglecting pushforwards and geometrical mappings.  However, the purpose
 of this demo is primarily didactic, so the unnecessary algebra is included.
 """
-
-from tIGArx.common import mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
-from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
-
-
+import numpy as np
 import dolfinx
 import ufl
+
 from mpi4py import MPI
 
-import numpy as np
+from tIGArx.common import mpirank
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
+from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
 
 
 ####### Preprocessing #######
@@ -39,9 +37,9 @@ degs = [1, 1, 1]
 
 # Knot vectors for defining the control mesh.
 kvecs = [
-    uniformKnots(degs[0], 0.0, np.pi, NEL, False),
-    uniformKnots(degs[1], 0.0, np.pi, NEL, False),
-    uniformKnots(degs[2], 0.0, np.pi, NEL, False),
+    uniform_knots(degs[0], 0.0, np.pi, NEL, False),
+    uniform_knots(degs[1], 0.0, np.pi, NEL, False),
+    uniform_knots(degs[2], 0.0, np.pi, NEL, False),
 ]
 
 # Define a trivial mapping from parametric to physical space, via explicit

@@ -31,18 +31,21 @@ input does not contain information about the connectivity of the Bezier
 element mesh, and nothing is currently done in the preprocessing to
 reconstruct this connectivity data.
 """
+import os.path
 
-from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
-from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
-
+import numpy as np
 import dolfinx
 import ufl
 
 from dolfinx import default_real_type
 
-import numpy as np
-import os.path
+from tIGArx.common import mpirank
+from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
+from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
+
+from tIGArx.ExtractedSpline import ExtractedSpline
+from tIGArx.MultiFieldSplines import EqualOrderSpline
+
 
 # Check for existence of required data file.
 FNAME = "sphere.iga"

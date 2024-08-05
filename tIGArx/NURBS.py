@@ -4,12 +4,13 @@ The ``NURBS`` module
 leverages ``igakit`` to read in NURBS data in PetIGA's format.  The module
 ``igakit`` must be installed for this to be usable.
 """
+import numpy as np
 
-from tIGArx.common import AbstractControlMesh
-from tIGArx.BSplines import BSpline, ij2dof, ijk2dof
 from igakit.io import PetIGA
 from igakit.nurbs import NURBS as NURBS_ik
-import numpy as np
+
+from tIGArx.BSplines import BSpline, ij2dof, ijk2dof
+from tIGArx.SplineInterface import AbstractControlMesh
 
 
 class NURBSControlMesh(AbstractControlMesh):

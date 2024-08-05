@@ -6,8 +6,11 @@ This example uses the simplest IGA discretization, namely, explicit B-splines
 in which parametric and physical space are the same.
 """
 
-from tIGArx.common import EqualOrderSpline, ExtractedSpline, mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
+from tIGArx.common import mpirank
+from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+
+from tIGArx.ExtractedSpline import ExtractedSpline
+from tIGArx.MultiFieldSplines import EqualOrderSpline
 
 import dolfinx
 import ufl
@@ -49,8 +52,8 @@ for level in range(0, N_LEVELS):
 
     # Create a control mesh for which $\Omega = \widehat{\Omega}$.
     splineMesh = ExplicitBSplineControlMesh(
-        [p, q], [uniformKnots(p, -1.0, 1.0, NELu),
-                 uniformKnots(q, -1.0, 1.0, NELv)]
+        [p, q], [uniform_knots(p, -1.0, 1.0, NELu),
+                 uniform_knots(q, -1.0, 1.0, NELv)]
     )
 
     # Create a spline generator for a spline with a single scalar field on the

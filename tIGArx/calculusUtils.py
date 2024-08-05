@@ -12,6 +12,8 @@ module can also be used in non-tIGArx FEniCS applications.
 # optimized for generality/readability rather than speed of execution.
 
 import dolfinx
+import numpy
+
 import ufl
 from ufl.classes import PermutationSymbol
 
@@ -464,32 +466,29 @@ def getQuadRule(n):
     formulations using a mixed element to combine DoFs from various time
     levels.
     """
+
     if n == 1:
         xi = [0.0]
         w = [2.0]
         return (xi, w)
-    if n == 2:
+    elif n == 2:
         xi = [-0.5773502691896257645091488, 0.5773502691896257645091488]
         w = [1.0, 1.0]
         return (xi, w)
-    if n == 3:
+    elif n == 3:
         xi = [-0.77459666924148337703585308, 0.0, 0.77459666924148337703585308]
         w = [0.55555555555555555555555556,
              0.88888888888888888888888889, 0.55555555555555555555555556]
         return (xi, w)
-    if n == 4:
+    elif n == 4:
         xi = [-0.86113631159405257524, -0.33998104358485626481,
               0.33998104358485626481, 0.86113631159405257524]
         w = [0.34785484513745385736, 0.65214515486254614264,
              0.65214515486254614264, 0.34785484513745385736]
         return (xi, w)
-
-    # TODO: add more quadrature rules (or, try to find a function in scipy or
-    # another common library, to generate arbitrary Gaussian quadrature
-    # rules on-demand).
-
-    print("ERROR: invalid number of quadrature points requested.")
-    exit()
+    else:
+        xi, w = numpy.polynomial.legendre.leggauss(n)
+        return (xi, w)
 
 
 def getQuadRuleInterval(n, L):

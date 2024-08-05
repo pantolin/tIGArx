@@ -5,6 +5,7 @@ verifying accuracy via the method of manufactured solutions.
 This example uses the simplest IGA discretization, namely, explicit B-splines
 in which parametric and physical space are the same.
 """
+import time
 
 from tIGArx.common import mpirank, EqualOrderSpline, ExtractedSpline
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniformKnots
@@ -22,6 +23,8 @@ N_LEVELS = 3
 
 # Array to store error at different refinement levels:
 L2_errors = np.zeros(N_LEVELS)
+
+profile = True
 
 for level in range(0, N_LEVELS):
 
@@ -43,7 +46,9 @@ for level in range(0, N_LEVELS):
     Ly = 1.0
 
     if mpirank == 0:
+        print("Dimension: ", NELu, "x", NELv)
         print("Generating extraction...")
+        start = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
 
     # Create a control mesh for which $\Omega = \widehat{\Omega}$.
     splineMesh = ExplicitBSplineControlMesh(
@@ -51,12 +56,24 @@ for level in range(0, N_LEVELS):
                  uniformKnots(q, y0, y0 + Ly, NELv)]
     )
 
+    if mpirank == 0:
+        if profile:
+            print("Generating B-spline control mesh: ",
+                  (time.clock_gettime_ns(time.CLOCK_MONOTONIC) - start) / 1e9)
+            start = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+
     # Create a spline generator for a spline with a single scalar field on the
     # given control mesh, where the scalar field is the same as the one used
     # to determine the mapping $\mathbf{F}:\widehat{\Omega}\to\Omega$.
     # FIXME
     splineGenerator = EqualOrderSpline(1, splineMesh)
     # splineGenerator = EqualOrderSpline(2, splineMesh)
+
+    if mpirank == 0:
+        if profile:
+            print("Generating spline generator: ",
+                  (time.clock_gettime_ns(time.CLOCK_MONOTONIC) - start) / 1e9)
+            start = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
 
     # Set Dirichlet boundary conditions on the 0-th (and only) field, on both
     # ends of the domain, in both directions.
@@ -66,6 +83,12 @@ for level in range(0, N_LEVELS):
         for side in [0, 1]:
             sideDofs = scalarSpline.getSideDofs(parametricDirection, side)
             splineGenerator.addZeroDofs(field, sideDofs)
+
+    if mpirank == 0:
+        if profile:
+            print("Setting Dirichlet bcs: ",
+                  (time.clock_gettime_ns(time.CLOCK_MONOTONIC) - start) / 1e9)
+            start = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
 
     # Alternative: set BCs based on location of corresponding control points.
     # (Note that this only makes sense for splineGenerator of type
@@ -106,6 +129,10 @@ for level in range(0, N_LEVELS):
     # spline = ExtractedSpline(DIR,QUAD_DEG)
 
     if mpirank == 0:
+        if profile:
+            print("Setting up extracted spline: ",
+                  (time.clock_gettime_ns(time.CLOCK_MONOTONIC) - start) / 1e9)
+            start = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
         print("Solving...")
 
     # Homogeneous coordinate representation of the trial function u.  Because
@@ -127,7 +154,18 @@ for level in range(0, N_LEVELS):
     L = ufl.inner(f, v) * spline.dx
     u = dolfinx.fem.Function(spline.V)
     u.name = "u"
+
+    if mpirank == 0:
+        if profile:
+            print("Setting up problem: ", (time.clock_gettime_ns(time.CLOCK_MONOTONIC) - start) / 1e9)
+            start = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+
     spline.solveLinearVariationalProblem(a == L, u)
+
+    if mpirank == 0:
+        if profile:
+            print("Solving problem: ", (time.clock_gettime_ns(time.CLOCK_MONOTONIC) - start) / 1e9)
+            start = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
 
     ####### Postprocessing #######
 

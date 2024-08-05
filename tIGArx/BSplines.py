@@ -53,6 +53,54 @@ def uniformKnots(p, start, end, N, periodic=False, continuityDrop=0):
     return retval
 
 
+def compute_local_extraction_operators(k_vec, p):
+
+    m = len(k_vec)
+
+    # Count the multiplicity of all the knots
+    knot_positions = []
+    for i in range(1, m):
+        if k_vec[i] == k_vec[i - 1]:
+            continue
+        knot_positions.append(i)
+    # Add the last knot as placeholder, assumed to be open
+    knot_positions.append(m)
+
+    c = np.zeros((len(knot_positions) - 1, p + 1, p + 1))
+    c[0, :, :] = np.eye(p + 1)
+
+    for n in range(0, len(knot_positions) - 1):
+        ind_start = knot_positions[n] - 1
+        ind_end = knot_positions[n + 1] - 1
+
+        mult = ind_end - ind_start
+
+        if mult < p:
+            c[n + 1, :, :] = np.eye(p + 1)  # Initialize the next extraction operator
+
+            # Compute the alphas
+            numer = k_vec[ind_end] - k_vec[ind_start]
+            alphas = np.zeros(p - mult)
+
+            for j in range(p, mult, -1):
+                alphas[j - mult - 1] = numer / (k_vec[ind_start + j] - k_vec[ind_start])
+
+            # Update the matrix coefficients for r new knots
+            r = p - mult
+            for j in range(1, r + 1):
+                s = mult + j
+
+                for k in range(p, s - 1, -1):
+                    alpha = alphas[k - s]
+                    c[n, :, k] = alpha * c[n, :, k] + (1.0 - alpha) * c[n, :, k - 1]
+
+                if ind_end < m:
+                    # The range : is exclusive, so we need to add 1 to the end
+                    c[n + 1, (r - j):(r + 1), r - j] = c[n, (p - j):(p + 1), p]
+
+    return c
+
+
 # need a custom eps for checking knots; dolfin_eps is too small and doesn't
 # reliably catch repeated knots
 KNOT_NEAR_EPS = 10.0 * np.finfo(default_real_type).eps

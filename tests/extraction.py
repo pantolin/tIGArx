@@ -67,7 +67,24 @@ def test_compute_local_extraction_operators():
 
     u = [0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0]
     p = 3
-    extraction_operators = compute_local_extraction_operators(u, p)
+    extraction_operators = compute_local_extraction_operators(np.array(u), p)
     extraction_operators_baseline = compute_local_extraction_operators_baseline(u, p)
+
+    # Time the new implementation
+    import time
+
+    array = np.array(
+        [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10], dtype=np.float64
+    )
+
+    start = time.time()
+    for _ in range(1000):
+        compute_local_extraction_operators_baseline(array, p)
+    print("\nBaseline implementation time: ", (time.time() - start) / 1000)
+
+    start = time.time()
+    for _ in range(10000):
+        compute_local_extraction_operators(array, p)
+    print("New implementation time: ", (time.time() - start) / 10000)
 
     print(np.allclose(extraction_operators, extraction_operators_baseline))

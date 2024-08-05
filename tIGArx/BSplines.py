@@ -17,6 +17,7 @@ import dolfinx
 from dolfinx import default_real_type
 
 import numpy as np
+import numba as nb
 import math
 
 
@@ -53,7 +54,22 @@ def uniformKnots(p, start, end, N, periodic=False, continuityDrop=0):
     return retval
 
 
+@nb.njit
 def compute_local_extraction_operators(k_vec, p):
+    """
+    Compute the local extraction operators for a B-spline basis with knot
+    vector ``k_vec`` and polynomial degree ``p``.  The extraction operators
+    are used to extract the spline basis functions from the Lagrange
+    basis functions - transforming the basis functions from the Bezier
+    space to the spline space.
+
+    Args:
+        k_vec: numpy array of floats, Knot vector
+        p: int, Polynomial degree
+
+    Returns:
+        c: numpy array of shape (n, p + 1, p + 1), Extraction operators
+    """
 
     m = len(k_vec)
 

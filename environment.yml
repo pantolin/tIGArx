@@ -1,0 +1,20 @@
+name: tIGArx
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - h5py
+  - mpich=4.2.1
+  - mpi4py=3.1.6
+  - fenics-dolfinx=0.7.3
+  - fenics-libdolfinx=0.7.3
+  - scipy
+  - numba
+  - pip:
+      - adios4dolfinx
+      - coverage
+      - iniconfig
+      - pluggy
+      - pytest
+      - https://github.com/dalcinl/igakit/archive/refs/heads/master.zip

@@ -88,7 +88,7 @@ def test_compute_bezier_extraction_operators():
         compute_local_bezier_extraction_operators(array, p)
     print("New implementation time: ", (time.time() - start) / 10000)
 
-    print(np.allclose(extraction_operators, extraction_operators_baseline))
+    np.allclose(extraction_operators, extraction_operators_baseline)
 
 
 def test_compute_lagrange_extraction_operators():
@@ -102,13 +102,46 @@ def test_compute_lagrange_extraction_operators():
     start = time.time()
     knots = uniform_knots(3, 0.0, 1.0, 10)
     spline = BSpline1(3, knots)
-    for _ in range(1000):
+    for _ in range(10000):
         spline.compute_local_lagrange_extraction_operator()
 
     print()
-    print("Time: ", (time.time() - start) / 1000)
+    print("Time: ", (time.time() - start) / 10000)
 
-    print(extraction_operators)
+    # Reference data obtained from MATLAB by implementing word
+    # for word Algorithm 1 from paper by Schillinger et al.:
+    # "Lagrange extraction and projection for NURBS basis functions:
+    # A direct link between isogeometric and standard nodal finite
+    # element formulations", Int. J. Numer. Meth. Engng 2016
+    d_1 = np.array([
+        [1.000000000000000, 0.296296296296296, 0.037037037037037, 0],
+        [0, 0.564814814814815, 0.518518518518519, 0.250000000000000],
+        [0, 0.132716049382716, 0.395061728395062, 0.583333333333333],
+        [0, 0.006172839506173, 0.049382716049383, 0.166666666666667]
+    ])
 
+    d_2 = np.array([
+        [0.250000000000000, 0.074074074074074, 0.009259259259259, 0],
+        [0.583333333333333, 0.549382716049383, 0.367283950617284, 0.166666666666667],
+        [0.166666666666667, 0.370370370370370, 0.574074074074074, 0.666666666666667],
+        [0, 0.006172839506173, 0.049382716049383, 0.166666666666667]
+    ])
 
+    d_3 = np.array([
+        [0.166666666666667, 0.049382716049383, 0.006172839506173, 0],
+        [0.666666666666667, 0.574074074074074, 0.370370370370370, 0.166666666666667],
+        [0.166666666666667, 0.367283950617284, 0.549382716049383, 0.583333333333333],
+        [0, 0.009259259259259, 0.074074074074074, 0.250000000000000]
+    ])
 
+    d_4 = np.array([
+        [0.166666666666667, 0.049382716049383, 0.006172839506173, 0],
+        [0.583333333333333, 0.395061728395062, 0.132716049382716, 0],
+        [0.250000000000000, 0.518518518518519, 0.564814814814815, 0],
+        [0, 0.037037037037037, 0.296296296296296, 1.000000000000000]
+    ])
+
+    # Stacking these arrays along a new third dimension to form a 3D tensor
+    reference = np.stack((d_1, d_2, d_3, d_4), axis=2)
+
+    np.allclose(extraction_operators, reference)

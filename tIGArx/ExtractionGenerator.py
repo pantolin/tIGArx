@@ -1,4 +1,5 @@
 import abc
+import time
 
 import numpy as np
 
@@ -29,6 +30,75 @@ class AbstractExtractionGenerator(object):
     """
 
     __metaclass__ = abc.ABCMeta
+
+    @abc.abstractmethod
+    def customSetup(self, args):
+        """
+        Customized instructions to execute during initialization.  ``args``
+        is a tuple of custom arguments.
+        """
+        return
+
+    @abc.abstractmethod
+    def getNFields(self):
+        """
+        Returns the number of unknown fields for the spline.
+        """
+        return
+
+    @abc.abstractmethod
+    def getHomogeneousCoordinate(self, node, direction):
+        """
+        Return the ``direction``-th homogeneous coordinate of the ``node``-th
+        control point of the spline.
+        """
+        return
+
+    @abc.abstractmethod
+    def generateMesh(self):
+        """
+        Generate and return an FE mesh suitable for extracting the
+        subclass's spline space.
+        """
+        return
+
+    @abc.abstractmethod
+    def getDegree(self, field):
+        """
+        Return the degree of polynomial to be used in the extracted
+        representation of a given ``field``, with ``-1`` being the
+        control field.
+        """
+        return
+
+    @abc.abstractmethod
+    def getNcp(self, field):
+        """
+        Return the total number of degrees of freedom of a given ``field``,
+        with field ``-1`` being the control mesh field.
+        """
+        return
+
+    @abc.abstractmethod
+    def getNsd(self):
+        """
+        Return the number of spatial dimensions of the physical domain.
+        """
+        return
+
+    @abc.abstractmethod
+    def generateM_control(self):
+        """
+        Return the extraction matrix for the control field.
+        """
+        return
+
+    @abc.abstractmethod
+    def generateM(self):
+        """
+        Return the extraction matrix for the unknowns.
+        """
+        return
 
     def __init__(self, comm, *args):
         """
@@ -102,61 +172,6 @@ class AbstractExtractionGenerator(object):
                 degrees, dim, discontinuous, nFields)
         return ufl_elem
 
-    @abc.abstractmethod
-    def customSetup(self, args):
-        """
-        Customized instructions to execute during initialization.  ``args``
-        is a tuple of custom arguments.
-        """
-        return
-
-    @abc.abstractmethod
-    def getNFields(self):
-        """
-        Returns the number of unknown fields for the spline.
-        """
-        return
-
-    @abc.abstractmethod
-    def getHomogeneousCoordinate(self, node, direction):
-        """
-        Return the ``direction``-th homogeneous coordinate of the ``node``-th
-        control point of the spline.
-        """
-        return
-
-    @abc.abstractmethod
-    def generateMesh(self):
-        """
-        Generate and return an FE mesh suitable for extracting the
-        subclass's spline space.
-        """
-        return
-
-    @abc.abstractmethod
-    def getDegree(self, field):
-        """
-        Return the degree of polynomial to be used in the extracted
-        representation of a given ``field``, with ``-1`` being the
-        control field.
-        """
-        return
-
-    @abc.abstractmethod
-    def getNcp(self, field):
-        """
-        Return the total number of degrees of freedom of a given ``field``,
-        with field ``-1`` being the control mesh field.
-        """
-        return
-
-    @abc.abstractmethod
-    def getNsd(self):
-        """
-        Return the number of spatial dimensions of the physical domain.
-        """
-        return
-
     def globalDof(self, field, localDof):
         """
         Given a ``field`` and a local DoF number ``localDof``,
@@ -224,21 +239,7 @@ class AbstractExtractionGenerator(object):
         """
         return DEFAULT_BASIS_FUNC_IGNORE_EPS
 
-    @abc.abstractmethod
-    def generateM_control(self):
-        """
-        Return the extraction matrix for the control field.
-        """
-        return
-
-    @abc.abstractmethod
-    def generateM(self):
-        """
-        Return the extraction matrix for the unknowns.
-        """
-        return
-
-    def genericSetup(self):
+    def genericSetup(self, profile=False):
         """
         Common setup steps for all subclasses (called in ``self.__init__()``).
         """

@@ -32,6 +32,17 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
         """
         return
 
+    @abc.abstractmethod
+    def getAllNodesAndEvals(self, x):
+        """
+        Given a numpy array of parametric points ``x``, return two numpy
+        2D tensors, one of indices and one of evaluations, such that
+        ``indices[i,j]`` is the index of the ``j``-th basis function
+        evaluated at the ``i``-th point, and ``evals[i,j]`` is the
+        corresponding evaluation.
+        """
+
+
     # return a matrix M for extraction
     def generateM_control(self):
         """
@@ -119,9 +130,14 @@ class AbstractCoordinateChartSpline(AbstractExtractionGenerator):
 
                 ignore_eps = self.getIgnoreEps()
                 # FIXME: to vectorize
-                for dof_col_local, val in nodesAndEvals:
-                    if abs(val) > ignore_eps:
-                        MPETSc[fem_dof, dof_col_local + igaDofsOffset] = val
+                n_e_arr = np.array(nodesAndEvals)
+                n_arr = np.array(n_e_arr[:, 0], dtype=INDEX_TYPE)
+                v_arr = np.array(n_e_arr[:, 1])
+                MPETSc[fem_dof, n_arr + igaDofsOffset] = v_arr
+
+                # for dof_col_local, val in nodesAndEvals:
+                #     if abs(val) > ignore_eps:
+                #         MPETSc[fem_dof, dof_col_local + igaDofsOffset] = val
 
         MPETSc.assemble()
 

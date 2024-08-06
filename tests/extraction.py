@@ -1,10 +1,11 @@
 import numpy as np
 
-from tIGArx.BSplines import compute_local_extraction_operators
+from tIGArx.BSplines import compute_local_bezier_extraction_operators, uniform_knots, \
+    BSpline1
 
 
-def test_compute_local_extraction_operators():
-    def compute_local_extraction_operators_baseline(u, p):
+def test_compute_bezier_extraction_operators():
+    def compute_bezier_extraction_operators_baseline(u, p):
         """
         This is a reference implementation, almost word for word,
         as implemented in the paper by Borden et al. "Isogeometric
@@ -67,8 +68,8 @@ def test_compute_local_extraction_operators():
 
     u = [0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0]
     p = 3
-    extraction_operators = compute_local_extraction_operators(np.array(u), p)
-    extraction_operators_baseline = compute_local_extraction_operators_baseline(u, p)
+    extraction_operators = compute_local_bezier_extraction_operators(np.array(u), p)
+    extraction_operators_baseline = compute_bezier_extraction_operators_baseline(u, p)
 
     # Time the new implementation
     import time
@@ -79,12 +80,35 @@ def test_compute_local_extraction_operators():
 
     start = time.time()
     for _ in range(1000):
-        compute_local_extraction_operators_baseline(array, p)
+        compute_bezier_extraction_operators_baseline(array, p)
     print("\nBaseline implementation time: ", (time.time() - start) / 1000)
 
     start = time.time()
     for _ in range(10000):
-        compute_local_extraction_operators(array, p)
+        compute_local_bezier_extraction_operators(array, p)
     print("New implementation time: ", (time.time() - start) / 10000)
 
     print(np.allclose(extraction_operators, extraction_operators_baseline))
+
+
+def test_compute_lagrange_extraction_operators():
+    knots = uniform_knots(3, 0.0, 4.0, 4)
+    spline = BSpline1(3, knots)
+
+    extraction_operators = spline.compute_local_lagrange_extraction_operator()
+
+    import time
+
+    start = time.time()
+    knots = uniform_knots(3, 0.0, 1.0, 10)
+    spline = BSpline1(3, knots)
+    for _ in range(1000):
+        spline.compute_local_lagrange_extraction_operator()
+
+    print()
+    print("Time: ", (time.time() - start) / 1000)
+
+    print(extraction_operators)
+
+
+

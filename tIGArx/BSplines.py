@@ -63,7 +63,7 @@ def uniform_knots(p, start, end, n_elem, periodic=False, continuity_drop=0):
 
 
 @nb.njit
-def compute_local_extraction_operators(k_vec, p):
+def compute_local_bezier_extraction_operators(k_vec, p):
     """
     Compute the local extraction operators for a B-spline basis with knot
     vector ``k_vec`` and polynomial degree ``p``.  The extraction operators
@@ -123,6 +123,10 @@ def compute_local_extraction_operators(k_vec, p):
                     c[n + 1, (r - j):(r + 1), r - j] = c[n, (p - j):(p + 1), p]
 
     return c
+
+
+
+
 
 
 # need a custom eps for checking knots; dolfin_eps is too small and doesn't
@@ -448,6 +452,29 @@ class BSpline1(object):
         #    ders[j] = ndu[j,pl]
 
         return ders
+
+    def compute_local_lagrange_extraction_operator(self):
+        p = self.p
+
+        operators = np.zeros((self.nel, p + 1, p + 1))
+
+        operators[0, 0, :] = self.basisFuncs(p, self.uniqueKnots[0])
+        for i in range(0, self.nel):
+            start_knot = self.uniqueKnots[i]
+            end_knot = self.uniqueKnots[i + 1]
+
+            # Subdivide the interval into p sub-intervals
+            h = (end_knot - start_knot) / p
+
+            # Compute the extraction operator for each sub-interval
+            for j in range(1, p + 1):
+                value = self.basisFuncs(i + p, start_knot + j * h)
+                operators[i, :, j] = np.array(value)
+
+            if i < self.nel - 1:
+                operators[i + 1, 0:p, 0] = operators[i, 1:(p + 1), p]
+
+        return operators
 
 
 # utility functions for indexing (mainly for internal library use)

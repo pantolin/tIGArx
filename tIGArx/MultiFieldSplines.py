@@ -72,7 +72,12 @@ class AbstractMultiFieldSpline(AbstractCoordinateChartSpline):
         return self.getControlMesh().getHomogeneousCoordinate(node, direction)
 
     def getNodesAndEvals(self, x, field):
+
         return self.getScalarSpline(field).getNodesAndEvals(x)
+
+    def getAllNodesAndEvals(self, x):
+
+        return self.getScalarSpline(-1).getAllNodesAndEvals(x)
 
     def generateMesh(self):
         return self.getScalarSpline(-1).generateMesh(comm=self.comm)

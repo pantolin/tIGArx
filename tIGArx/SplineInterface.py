@@ -1,4 +1,5 @@
 import abc
+import numpy as np
 
 from tIGArx.common import worldcomm, DEFAULT_PREALLOC
 
@@ -48,6 +49,22 @@ class AbstractScalarBasis(object):
         this spline basis.
         """
         return
+
+    def getAllNodesAndEvals(self, xi_arr):
+        """
+        Given a numpy array of parametric points ``xi``, return two numpy
+        2D tensors, one of indices and one of evaluations, such that
+        ``indices[i,j]`` is the index of the ``j``-th basis function
+        evaluated at the ``i``-th point, and ``evals[i,j]`` is the
+        corresponding evaluation.
+        """
+        # Here is a dirty implementation, as straightforward as possible.
+
+        nodes_and_evals_list = [self.getNodesAndEvals(xi) for xi in xi_arr]
+
+        np_arr = np.array(nodes_and_evals_list)
+
+        return np.array(np_arr[:, :, 0], dtype=np.int32), np_arr[:, :, 1]
 
     # TODO: get rid of the DG stuff in coordinate chart splines, since
     # getNodesAndEvals() is inherently unstable for discontinuous functions

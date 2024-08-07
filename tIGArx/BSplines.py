@@ -125,10 +125,6 @@ def compute_local_bezier_extraction_operators(k_vec, p):
     return c
 
 
-
-
-
-
 # need a custom eps for checking knots; dolfin_eps is too small and doesn't
 # reliably catch repeated knots
 KNOT_NEAR_EPS = 10.0 * np.finfo(default_real_type).eps

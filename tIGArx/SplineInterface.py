@@ -26,6 +26,16 @@ class AbstractScalarBasis(object):
         """
         return
 
+    def getNodes(self, xi):
+        """
+        Given a parametric point ``xi``, return a list of the form
+
+        ``[index0, index1, ... ]``
+
+        where ``index_i`` is the index of the ``i``-th basis function.
+        """
+        return [node[0] for node in self.getNodesAndEvals(xi)]
+
     @abc.abstractmethod
     def getNcp(self):
         """

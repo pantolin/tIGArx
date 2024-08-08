@@ -4,7 +4,7 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalAssembly import assemble_matrix
+from tIGArx.LocalAssembly import assemble_matrix, assemble_vector, ksp_solve_direct
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
@@ -142,12 +142,34 @@ def run_poisson():
 
         # Assemble the linear system.
         a_form = dolfinx.fem.form(a)
-        assemble_matrix(a_form, splineMesh.getScalarSpline())
+        mat = assemble_matrix(a_form, splineMesh.getScalarSpline())
+        L_form = dolfinx.fem.form(L)
+        vec = assemble_vector(L_form, splineMesh.getScalarSpline())
+
+        sideDofs = []
+        for parametricDirection in [0, 1]:
+            for side in [0, 1]:
+                sideDofs.append(scalarSpline.getSideDofs(parametricDirection, side))
+
+        # Filter for unique dofs
+        sideDofs = np.unique(np.concatenate(sideDofs))
+        sideDofs = list(sideDofs)
+        # Apply Dirichlet BCs
+
+        mat.zeroRowsColumns(sideDofs, 1.0)
+        vec.setValues(sideDofs, np.zeros(len(sideDofs), dtype=np.float64))
+
+        # Print matrix and vector
+        # if mpirank == 0:
+        #     for i in range(mat.size[0]):
+        #         for j in range(mat.size[1]):
+        #             print(mat[i, j], end=" ")
+        #         print()
 
         perf_log.end_timing("Assembling problem")
         perf_log.start_timing("Solve problem")
 
-        spline.solveLinearVariationalProblem(a == L, u)
+        u.x.array[:splineMesh.getScalarSpline().getNcp()] = ksp_solve_direct(mat, vec)
 
         perf_log.end_timing("Solve problem")
         perf_log.end_timing("Solving")

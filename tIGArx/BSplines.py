@@ -504,6 +504,18 @@ class BSpline(AbstractScalarBasis):
     a uni-, bi-, or tri-variate B-spline.
     """
 
+    def get_lagrange_extraction_operators(self):
+        """
+        Returns a list of local Lagrange extraction operators, one for each
+        unique knot span.
+        """
+        operators = []
+        for i in range(0, self.nvar):
+            operators += [
+                self.splines[i].compute_local_lagrange_extraction_operator(),
+            ]
+        return operators
+
     def __init__(self, degrees, kvecs, overRefine=0):
         """
         Create a ``BSpline`` with degrees in each direction given by the

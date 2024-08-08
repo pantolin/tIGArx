@@ -76,6 +76,19 @@ class AbstractScalarBasis(object):
 
         return np.array(np_arr[:, :, 0], dtype=np.int32), np_arr[:, :, 1]
 
+    @abc.abstractmethod
+    def get_lagrange_extraction_operators(self):
+        """
+        Returns the extraction operators which are used to map between
+        the spline basis and the Lagrange basis. There should be as many
+        elements in the returned array as there are dimensions and each
+        element should be a 3D numpy array, with the first dimension being
+        the number of basis functions in the spline basis, and the
+        remaining two equal to max_degree+1, where max_degree is the
+        maximum degree of the Lagrange basis functions / spline basis
+        """
+        return
+
     # TODO: get rid of the DG stuff in coordinate chart splines, since
     # getNodesAndEvals() is inherently unstable for discontinuous functions
     # and some other instantiation of AbstractExtractionGenerator

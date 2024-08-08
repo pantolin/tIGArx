@@ -159,17 +159,20 @@ def run_poisson():
         mat.zeroRowsColumns(sideDofs, 1.0)
         vec.setValues(sideDofs, np.zeros(len(sideDofs), dtype=np.float64))
 
-        # Print matrix and vector
-        # if mpirank == 0:
-        #     for i in range(mat.size[0]):
-        #         for j in range(mat.size[1]):
-        #             print(mat[i, j], end=" ")
-        #         print()
-
         perf_log.end_timing("Assembling problem")
         perf_log.start_timing("Solve problem")
 
-        u.x.array[:splineMesh.getScalarSpline().getNcp()] = ksp_solve_direct(mat, vec)
+        cp_sol = ksp_solve_direct(mat, vec, True)
+
+        # Using the global matrix because it is available, the same
+        # effect could be achieved by evaluating the splines at the
+        # desired points and multiplying by the control point
+        # contribution to the solution.
+        sol = splineGenerator.M * cp_sol
+        size = u.x.index_map.size_local
+        u.x.array[:size] = sol.array_r
+
+        # convert the values at control points to the values at dofs
 
         perf_log.end_timing("Solve problem")
         perf_log.end_timing("Solving")

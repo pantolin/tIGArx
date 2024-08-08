@@ -1,5 +1,10 @@
+import ctypes
+
 import numpy as np
 import numba as nb
+import petsc4py.PETSc
+
+import dolfinx.fem.petsc
 
 from cffi import FFI
 from petsc4py import PETSc
@@ -9,6 +14,31 @@ from tIGArx.SplineInterface import AbstractScalarBasis
 ffi = FFI()
 
 import dolfinx
+
+petsc_lib = dolfinx.fem.petsc.load_petsc_lib(ctypes.cdll.LoadLibrary)
+
+set_mat = getattr(petsc_lib, "MatSetValuesLocal")
+set_vec = getattr(petsc_lib, "VecSetValuesLocal")
+
+set_mat.restype = None
+set_mat.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_int,
+    ctypes.POINTER(ctypes.c_int),
+    ctypes.c_int,
+    ctypes.POINTER(ctypes.c_int),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.c_int,
+]
+
+set_vec.restype = None
+set_vec.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_int,
+    ctypes.POINTER(ctypes.c_int),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.c_int,
+]
 
 
 def assemble_matrix(form, spline: AbstractScalarBasis):
@@ -41,13 +71,9 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
     mat = PETSc.Mat(form.mesh.comm)
     mat.createAIJ(spline.getNcp(), spline.getNcp())
 
-    max_nonzeros_per_row = 0
-    row_nnz = [0] * spline.getNcp()
-    for dofs in spline_dofmap:
-        for dof in dofs:
-            row_nnz[dof] += 1
-
-    # mat.setPreallocationNNZ(row_nnz)
+    # mat.setPreallocationNNZ(
+    #     np.array(np.repeat(num_loc_dofs * 4, spline.getNcp()), dtype=np.int32)
+    # )
 
     consts = dolfinx.cpp.fem.pack_constants(form._cpp_object)
     all_coeffs = dolfinx.cpp.fem.pack_coefficients(form._cpp_object)
@@ -66,7 +92,7 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
             coeffs = all_coeffs[(integral, -1)]
 
             _assemble_cells(
-                mat,
+                mat.handle,
                 kernel,
                 vertices,
                 coords,
@@ -76,7 +102,9 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
                 consts,
                 cells,
                 extraction_operators,
-                bs
+                bs,
+                set_mat,
+                PETSc.InsertMode.ADD_VALUES
             )
 
     mat.assemble()
@@ -84,8 +112,9 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
     return mat
 
 
+@nb.njit
 def _assemble_cells(
-    mat,
+    mat_handle,
     kernel,
     vertices,
     coords,
@@ -95,7 +124,9 @@ def _assemble_cells(
     consts,
     cells,
     extraction_operators,
-    bs
+    bs,
+    set_vals,
+    mode
 ):
     # Initialize
     num_loc_vertices = vertices.shape[1]
@@ -109,11 +140,12 @@ def _assemble_cells(
     bs_mat = np.ones(bs, dtype=np.float64)
 
     for k, cell in enumerate(cells):
+
         j = cell // extraction_operators[0].shape[0]
         i = cell % extraction_operators[0].shape[0]
 
-        extraction_i = extraction_operators[0][i, :, :]
-        extraction_j = extraction_operators[1][j, :, :]
+        extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
+        extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
 
         extraction_kron = np.kron(extraction_i, extraction_j)
         full_kron = np.kron(extraction_kron, bs_mat)
@@ -133,7 +165,17 @@ def _assemble_cells(
 
         A_local = full_kron @ A_local @ full_kron.T
 
-        mat.setValues(pos, pos, A_local, PETSc.InsertMode.ADD_VALUES)
+        # mat.setValues(pos, pos, A_local, PETSc.InsertMode.ADD_VALUES)
+        set_vals(
+            mat_handle,
+            num_loc_dofs,
+            ffi.from_buffer(pos),
+            num_loc_dofs,
+            ffi.from_buffer(pos),
+            ffi.from_buffer(A_local),
+            mode
+        )
+
 
 def assemble_vector(form, spline: AbstractScalarBasis):
     """
@@ -165,14 +207,6 @@ def assemble_vector(form, spline: AbstractScalarBasis):
     vec = PETSc.Vec(form.mesh.comm)
     vec = vec.createWithArray(np.zeros(spline.getNcp()))
 
-    max_nonzeros_per_row = 0
-    row_nnz = [0] * spline.getNcp()
-    for dofs in spline_dofmap:
-        for dof in dofs:
-            row_nnz[dof] += 1
-
-    # mat.setPreallocationNNZ(row_nnz)
-
     consts = dolfinx.cpp.fem.pack_constants(form._cpp_object)
     all_coeffs = dolfinx.cpp.fem.pack_coefficients(form._cpp_object)
 
@@ -190,7 +224,7 @@ def assemble_vector(form, spline: AbstractScalarBasis):
             coeffs = all_coeffs[(integral, -1)]
 
             _assemble_vector(
-                vec,
+                vec.handle,
                 kernel,
                 vertices,
                 coords,
@@ -200,7 +234,9 @@ def assemble_vector(form, spline: AbstractScalarBasis):
                 consts,
                 cells,
                 extraction_operators,
-                bs
+                bs,
+                set_vec,
+                PETSc.InsertMode.ADD_VALUES
             )
 
     vec.assemble()
@@ -208,6 +244,7 @@ def assemble_vector(form, spline: AbstractScalarBasis):
     return vec
 
 
+@nb.njit
 def _assemble_vector(
     vec,
     kernel,
@@ -219,7 +256,9 @@ def _assemble_vector(
     consts,
     cells,
     extraction_operators,
-    bs
+    bs,
+    set_vals,
+    mode
 ):
     # Initialize
     num_loc_vertices = vertices.shape[1]
@@ -236,8 +275,8 @@ def _assemble_vector(
         j = cell // extraction_operators[0].shape[0]
         i = cell % extraction_operators[0].shape[0]
 
-        extraction_i = extraction_operators[0][i, :, :]
-        extraction_j = extraction_operators[1][j, :, :]
+        extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
+        extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
 
         extraction_kron = np.kron(extraction_i, extraction_j)
         full_kron = np.kron(extraction_kron, bs_mat)
@@ -257,7 +296,14 @@ def _assemble_vector(
 
         vec_local = full_kron @ vec_local
 
-        vec.setValues(pos, vec_local, PETSc.InsertMode.ADD_VALUES)
+        # vec.setValues(pos, vec_local, PETSc.InsertMode.ADD_VALUES)
+        set_vals(
+            vec,
+            num_loc_dofs,
+            ffi.from_buffer(pos),
+            ffi.from_buffer(vec_local),
+            mode
+        )
 
 @nb.njit
 def assemble_cells(

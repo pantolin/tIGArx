@@ -452,9 +452,12 @@ class BSpline1(object):
     def compute_local_lagrange_extraction_operator(self):
         p = self.p
 
-        operators = np.zeros((self.nel, p + 1, p + 1))
+        operators = np.zeros((self.nel, p + 1, p + 1),
+                             dtype=default_real_type, order='C')
 
-        operators[0, 0, :] = self.basisFuncs(p, self.uniqueKnots[0])
+        value = self.basisFuncs(p, self.uniqueKnots[0])
+        operators[0, 0, :] = np.array(value, order='C')
+
         for i in range(0, self.nel):
             start_knot = self.uniqueKnots[i]
             end_knot = self.uniqueKnots[i + 1]
@@ -465,7 +468,7 @@ class BSpline1(object):
             # Compute the extraction operator for each sub-interval
             for j in range(1, p + 1):
                 value = self.basisFuncs(i + p, start_knot + j * h)
-                operators[i, :, j] = np.array(value)
+                operators[i, :, j] = np.array(value, order='C')
 
             if i < self.nel - 1:
                 operators[i + 1, 0:p, 0] = operators[i, 1:(p + 1), p]
@@ -504,7 +507,7 @@ class BSpline(AbstractScalarBasis):
     a uni-, bi-, or tri-variate B-spline.
     """
 
-    def get_lagrange_extraction_operators(self):
+    def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
         """
         Returns a list of local Lagrange extraction operators, one for each
         unique knot span.

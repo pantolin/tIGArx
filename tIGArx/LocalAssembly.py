@@ -68,12 +68,19 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
         coord = coords[vertices[cell, :]].sum(axis=0) / 2 ** gdim
         spline_dofmap[cell, :] = (spline.getNodes(coord))
 
-    mat = PETSc.Mat(form.mesh.comm)
-    mat.createAIJ(spline.getNcp(), spline.getNcp())
+    max_per_row = (2 * spline.getDegree() + 1) ** gdim
 
-    # mat.setPreallocationNNZ(
-    #     np.array(np.repeat(num_loc_dofs * 4, spline.getNcp()), dtype=np.int32)
+    # nnz_per_row = get_nnz_pre_allocation(
+    #     cells, spline_dofmap, spline.getNcp(), max_per_row
     # )
+
+    ind_ptr, indices = get_csr_pre_allocation(
+        cells, spline_dofmap, spline.getNcp(), max_per_row
+    )
+
+    mat = PETSc.Mat(form.mesh.comm)
+    mat.createAIJ(spline.getNcp(), spline.getNcp(), nnz=ind_ptr[-1])
+    mat.setPreallocationCSR((ind_ptr, indices))
 
     consts = dolfinx.cpp.fem.pack_constants(form._cpp_object)
     all_coeffs = dolfinx.cpp.fem.pack_coefficients(form._cpp_object)
@@ -91,7 +98,7 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
             )
             coeffs = all_coeffs[(integral, -1)]
 
-            _assemble_cells(
+            assemble_cells(
                 mat.handle,
                 kernel,
                 vertices,
@@ -112,8 +119,60 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
     return mat
 
 
-@nb.njit
 def _assemble_cells(
+    mat,
+    kernel,
+    vertices,
+    coords,
+    dofmap,
+    num_loc_dofs,
+    coeffs,
+    consts,
+    cells,
+    extraction_operators,
+    bs,
+):
+    # Initialize
+    num_loc_vertices = vertices.shape[1]
+    cell_coords = np.zeros((num_loc_vertices, 3))
+    A_local = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
+    entity_local_index = np.array([0], dtype=np.intc)
+
+    # Don't permute
+    perm = np.array([0], dtype=np.uint8)
+
+    bs_mat = np.ones(bs, dtype=np.float64)
+
+    for k, cell in enumerate(cells):
+        j = cell // extraction_operators[0].shape[0]
+        i = cell % extraction_operators[0].shape[0]
+
+        extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
+        extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
+
+        extraction_kron = np.kron(extraction_i, extraction_j)
+        full_kron = np.kron(extraction_kron, bs_mat)
+
+        pos = dofmap[cell, :]
+        cell_coords[:, :] = coords[vertices[cell, :]]
+        A_local.fill(0.0)
+
+        kernel(
+            ffi.from_buffer(A_local),
+            ffi.from_buffer(coeffs[cell]),
+            ffi.from_buffer(consts),
+            ffi.from_buffer(cell_coords),
+            ffi.from_buffer(entity_local_index),
+            ffi.from_buffer(perm),
+        )
+
+        A_local = full_kron @ A_local @ full_kron.T
+
+        mat.setValues(pos, pos, A_local, PETSc.InsertMode.ADD_VALUES)
+
+
+@nb.njit
+def assemble_cells(
     mat_handle,
     kernel,
     vertices,
@@ -140,7 +199,6 @@ def _assemble_cells(
     bs_mat = np.ones(bs, dtype=np.float64)
 
     for k, cell in enumerate(cells):
-
         j = cell // extraction_operators[0].shape[0]
         i = cell % extraction_operators[0].shape[0]
 
@@ -165,7 +223,7 @@ def _assemble_cells(
 
         A_local = full_kron @ A_local @ full_kron.T
 
-        # mat.setValues(pos, pos, A_local, PETSc.InsertMode.ADD_VALUES)
+        # Using ffi here as a "hack" to avoid ctypes python function
         set_vals(
             mat_handle,
             num_loc_dofs,
@@ -305,56 +363,6 @@ def _assemble_vector(
             mode
         )
 
-@nb.njit
-def assemble_cells(
-    Ah,
-    kernel,
-    vertices,
-    coords,
-    dofmap,
-    num_loc_dofs,
-    coeffs,
-    consts,
-    cells,
-    set_vals,
-    mode,
-):
-    # Initialize
-    num_loc_vertices = vertices.shape[1]
-    cell_coords = np.zeros((num_loc_vertices, 3))
-    A_local = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
-    entity_local_index = np.array([0], dtype=np.intc)
-
-    # Don't permute
-    perm = np.array([0], dtype=np.uint8)
-
-    for k, cell in enumerate(cells):
-        pos = dofmap[cell, :]
-        cell_coords[:, :] = coords[vertices[cell, :]]
-        A_local.fill(0.0)
-
-        kernel(
-            ffi.from_buffer(A_local),
-            ffi.from_buffer(coeffs[cell]),
-            ffi.from_buffer(consts),
-            ffi.from_buffer(cell_coords),
-            ffi.from_buffer(entity_local_index),
-            ffi.from_buffer(perm),
-        )
-        # print the local matrix for debugging
-        # print("Local matrix for cell ", k)
-        # print(A_local)
-
-        set_vals(
-            Ah,
-            num_loc_dofs,
-            ffi.from_buffer(pos),
-            num_loc_dofs,
-            ffi.from_buffer(pos),
-            ffi.from_buffer(A_local),
-            mode,
-        )
-
 
 def get_vertices(mesh: dolfinx.mesh.Mesh):
     """
@@ -401,6 +409,81 @@ def lock_inactive_dofs(inactive_dofs: list[np.int32], A: PETSc.Mat, alpha: float
         raise RuntimeError("Zeros on the diagonal should not happen")
 
     return A
+
+
+@nb.njit
+def get_nnz_pre_allocation_small(cells, dofmap, rows):
+    # Use a boolean matrix to track nonzero entries
+    nnz_bool = np.zeros((rows, rows), dtype=np.uint8)
+
+    # Iterate over cells and dofmap to populate the boolean matrix
+    for cell in cells:
+        for row_idx in dofmap[cell, :]:
+            for dof in dofmap[cell, :]:
+                nnz_bool[row_idx, dof] = 1
+
+    # Sum across rows to get nnz per row
+    nnz_per_row = nnz_bool.sum(axis=1)
+
+    return nnz_per_row.astype(np.int32)
+
+
+@nb.njit
+def get_nnz_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
+    temp_dofs = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
+    nnz_per_row = np.zeros(rows, dtype=np.int32)
+
+    for cell in cells:
+        for row_idx in dofmap[cell, :]:
+            for dof in dofmap[cell, :]:
+                found = False
+                # Linear search is used here because maintaining a sorted
+                # array is expected to be expensive
+                for i in range(nnz_per_row[row_idx]):
+                    if temp_dofs[row_idx, i] == dof:
+                        found = True
+                        break
+                if not found:
+                    temp_dofs[row_idx, nnz_per_row[row_idx]] = dof
+                    nnz_per_row[row_idx] += 1
+
+    return nnz_per_row
+
+
+@nb.njit
+def get_csr_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
+    dofs_per_row = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
+    nnz_per_row = np.zeros(rows, dtype=np.int32)
+
+    for cell in cells:
+        for row_idx in dofmap[cell, :]:
+            for dof in dofmap[cell, :]:
+                found = False
+                # Linear search is used here because maintaining a sorted
+                # array is expected to be expensive
+                for i in range(nnz_per_row[row_idx]):
+                    if dofs_per_row[row_idx, i] == dof:
+                        found = True
+                        break
+                if not found:
+                    dofs_per_row[row_idx, nnz_per_row[row_idx]] = dof
+                    nnz_per_row[row_idx] += 1
+
+    index_ptr = np.zeros(rows + 1, dtype=np.int32)
+    for i in range(rows):
+        index_ptr[i + 1] = index_ptr[i] + nnz_per_row[i]
+
+    indices = np.zeros(index_ptr[-1], dtype=np.int32)
+
+    index = 0
+    for row, row_dofs in enumerate(dofs_per_row):
+        sorted_dofs = np.sort(row_dofs[:nnz_per_row[row]])
+
+        for i in range(nnz_per_row[row]):
+            indices[index] = sorted_dofs[i]
+            index += 1
+
+    return index_ptr, indices
 
 
 def ksp_solve_direct(A: PETSc.Mat, b: PETSc.Vec, profile=False):

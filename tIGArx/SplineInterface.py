@@ -44,6 +44,14 @@ class AbstractScalarBasis(object):
         return
 
     @abc.abstractmethod
+    def getElement(self, xi):
+        """
+        Given a parametric point ``xi``, return the element of the basis
+        function that is nonzero at that point.
+        """
+        return
+
+    @abc.abstractmethod
     def generateMesh(self, comm=worldcomm):
         """
         Generates and returns an FE mesh sufficient for extracting this spline

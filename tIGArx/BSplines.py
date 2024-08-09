@@ -507,18 +507,6 @@ class BSpline(AbstractScalarBasis):
     a uni-, bi-, or tri-variate B-spline.
     """
 
-    def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
-        """
-        Returns a list of local Lagrange extraction operators, one for each
-        unique knot span.
-        """
-        operators = []
-        for i in range(0, self.nvar):
-            operators += [
-                self.splines[i].compute_local_lagrange_extraction_operator(),
-            ]
-        return operators
-
     def __init__(self, degrees, kvecs, overRefine=0):
         """
         Create a ``BSpline`` with degrees in each direction given by the
@@ -712,6 +700,48 @@ class BSpline(AbstractScalarBasis):
         for i in range(0, self.nvar):
             deg = max(deg, self.splines[i].p)
         return deg
+
+    def getElement(self, xi):
+        """
+        Returns the element index that contains the point ``xi``.
+        """
+        if self.nvar == 1:
+            u = xi[0]
+            uspline = self.splines[0]
+            span = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
+            return span
+        elif self.nvar == 2:
+            u = xi[0]
+            v = xi[1]
+            uspline = self.splines[0]
+            vspline = self.splines[1]
+            spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
+            spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
+            return spanu * vspline.nel + spanv
+        else:
+            u = xi[0]
+            v = xi[1]
+            w = xi[2]
+            uspline = self.splines[0]
+            vspline = self.splines[1]
+            wspline = self.splines[2]
+            spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
+            spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
+            spanw = wspline.getKnotSpan(w) - wspline.multiplicities[0] + 1
+            return spanu * vspline.nel * wspline.nel + spanv * wspline.nel + spanw
+
+
+    def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
+        """
+        Returns a list of local Lagrange extraction operators, one for each
+        unique knot span.
+        """
+        operators = []
+        for i in range(0, self.nvar):
+            operators += [
+                self.splines[i].compute_local_lagrange_extraction_operator(),
+            ]
+        return operators
 
     def computeNel(self):
         """

@@ -107,6 +107,12 @@ def identity_partitioner(
 # eval-ing shape functions
 class RhinoTSplineScalarBasis(AbstractScalarBasis):
 
+    def get_lagrange_extraction_operators(self):
+        pass
+
+    def getElement(self, xi):
+        pass
+
     def __init__(self, fname):
         """
         Generates an instance of ``RhinoTSplineScalarBasis`` from

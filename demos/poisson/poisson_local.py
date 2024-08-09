@@ -4,7 +4,7 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalAssembly import assemble_matrix, assemble_vector, ksp_solve_direct
+from tIGArx.LocalAssembly import assemble_matrix, assemble_vector, ksp_solve_iteratively
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
@@ -18,7 +18,7 @@ def run_poisson():
     # Number of levels of refinement with which to run the Poisson problem.
     # (Note: Paraview output files will correspond to the last/highest level
     # of refinement.)
-    N_LEVELS = 3
+    N_LEVELS = 4
 
     # Array to store error at different refinement levels:
     L2_errors = np.zeros(N_LEVELS)
@@ -146,6 +146,12 @@ def run_poisson():
         L_form = dolfinx.fem.form(L)
         vec = assemble_vector(L_form, splineMesh.getScalarSpline())
 
+        if mpirank == 0:
+            for i in range(mat.size[0]):
+                for j in range(mat.size[1]):
+                    print(mat[i, j], end=" ")
+                print()
+
         sideDofs = []
         for parametricDirection in [0, 1]:
             for side in [0, 1]:
@@ -162,7 +168,7 @@ def run_poisson():
         perf_log.end_timing("Assembling problem")
         perf_log.start_timing("Solve problem")
 
-        cp_sol = ksp_solve_direct(mat, vec, True)
+        cp_sol = ksp_solve_iteratively(mat, vec)
 
         # Using the global matrix because it is available, the same
         # effect could be achieved by evaluating the splines at the

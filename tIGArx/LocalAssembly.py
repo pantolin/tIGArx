@@ -10,6 +10,7 @@ from cffi import FFI
 from petsc4py import PETSc
 
 from tIGArx.SplineInterface import AbstractScalarBasis
+from tIGArx.utils import perf_log
 
 ffi = FFI()
 
@@ -52,21 +53,31 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
     Returns:
         A (dolfinx.cpp.la.PETScMatrix): assembled matrix
     """
+    perf_log.start_timing("Assembling matrix", True)
+    perf_log.start_timing("Getting form data")
 
     vertices, coords, gdim = get_vertices(form.mesh)
 
-    cells = form.mesh.topology.original_cell_index
+    cells = np.arange(form.mesh.topology.original_cell_index.size, dtype=np.int32)
     bs = form.function_spaces[0].dofmap.index_map_bs
     num_loc_dofs = bs
     for _ in range(gdim):
         num_loc_dofs *= (spline.getDegree() + 1)
 
+    perf_log.end_timing("Getting form data")
+    perf_log.start_timing("Creating dofmap")
+
     spline_dofmap = np.zeros((len(cells), num_loc_dofs), dtype=np.int32)
+    extraction_dofmap = np.zeros(len(cells), dtype=np.int64)
 
     for cell in cells:
         # Pick the center of interval/quad/hex for the evaluation point
         coord = coords[vertices[cell, :]].sum(axis=0) / 2 ** gdim
         spline_dofmap[cell, :] = (spline.getNodes(coord))
+        extraction_dofmap[cell] = spline.getElement(coord)
+
+    perf_log.end_timing("Creating dofmap")
+    perf_log.start_timing("Computing pre-allocation")
 
     max_per_row = (2 * spline.getDegree() + 1) ** gdim
 
@@ -78,18 +89,30 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
         cells, spline_dofmap, spline.getNcp(), max_per_row
     )
 
+    perf_log.end_timing("Computing pre-allocation")
+    perf_log.start_timing("Pre-allocating matrix")
+
     mat = PETSc.Mat(form.mesh.comm)
+    # mat.createAIJ(spline.getNcp(), spline.getNcp(), nnz=nnz_per_row)
+
     mat.createAIJ(spline.getNcp(), spline.getNcp(), nnz=ind_ptr[-1])
     mat.setPreallocationCSR((ind_ptr, indices))
+
+    perf_log.end_timing("Pre-allocating matrix")
+    perf_log.start_timing("Packing constants")
 
     consts = dolfinx.cpp.fem.pack_constants(form._cpp_object)
     all_coeffs = dolfinx.cpp.fem.pack_coefficients(form._cpp_object)
 
-    integrals = form.integral_types
+    perf_log.end_timing("Packing constants")
+    perf_log.start_timing("Computing extraction operators")
 
     extraction_operators = spline.get_lagrange_extraction_operators()
 
-    for integral in integrals:
+    perf_log.end_timing("Computing extraction operators")
+    perf_log.start_timing("Assembly step")
+
+    for integral in form.integral_types:
         if integral == dolfinx.fem.IntegralType.cell:
 
             kernel = getattr(
@@ -98,8 +121,8 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
             )
             coeffs = all_coeffs[(integral, -1)]
 
-            assemble_cells(
-                mat.handle,
+            _assemble_cells(
+                mat,
                 kernel,
                 vertices,
                 coords,
@@ -109,12 +132,14 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
                 consts,
                 cells,
                 extraction_operators,
+                extraction_dofmap,
                 bs,
-                set_mat,
-                PETSc.InsertMode.ADD_VALUES
             )
 
     mat.assemble()
+
+    perf_log.end_timing("Assembly step")
+    perf_log.end_timing("Assembling matrix")
 
     return mat
 
@@ -130,6 +155,7 @@ def _assemble_cells(
     consts,
     cells,
     extraction_operators,
+    extraction_dofmap,
     bs,
 ):
     # Initialize
@@ -143,12 +169,13 @@ def _assemble_cells(
 
     bs_mat = np.ones(bs, dtype=np.float64)
 
-    for k, cell in enumerate(cells):
-        j = cell // extraction_operators[0].shape[0]
-        i = cell % extraction_operators[0].shape[0]
+    for cell in cells:
+        element = extraction_dofmap[cell]
+        i = element // extraction_operators[0].shape[0]
+        j = element % extraction_operators[0].shape[0]
 
-        extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
-        extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
+        extraction_j = np.ascontiguousarray(extraction_operators[0][i, :, :])
+        extraction_i = np.ascontiguousarray(extraction_operators[1][j, :, :])
 
         extraction_kron = np.kron(extraction_i, extraction_j)
         full_kron = np.kron(extraction_kron, bs_mat)
@@ -166,7 +193,7 @@ def _assemble_cells(
             ffi.from_buffer(perm),
         )
 
-        A_local = full_kron @ A_local @ full_kron.T
+        A_local = np.matmul(full_kron, np.matmul(A_local, full_kron.T))
 
         mat.setValues(pos, pos, A_local, PETSc.InsertMode.ADD_VALUES)
 
@@ -183,6 +210,7 @@ def assemble_cells(
     consts,
     cells,
     extraction_operators,
+    extraction_dofmap,
     bs,
     set_vals,
     mode
@@ -198,9 +226,10 @@ def assemble_cells(
 
     bs_mat = np.ones(bs, dtype=np.float64)
 
-    for k, cell in enumerate(cells):
-        j = cell // extraction_operators[0].shape[0]
-        i = cell % extraction_operators[0].shape[0]
+    for cell in cells:
+        element = extraction_dofmap[cell]
+        i = element // extraction_operators[0].shape[0]
+        j = element % extraction_operators[0].shape[0]
 
         extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
         extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
@@ -246,6 +275,8 @@ def assemble_vector(form, spline: AbstractScalarBasis):
     Returns:
         A (dolfinx.cpp.la.PETScMatrix): assembled matrix
     """
+    perf_log.start_timing("Assembling vector", True)
+    perf_log.start_timing("Getting form data")
 
     vertices, coords, gdim = get_vertices(form.mesh)
 
@@ -255,24 +286,39 @@ def assemble_vector(form, spline: AbstractScalarBasis):
     for _ in range(gdim):
         num_loc_dofs *= (spline.getDegree() + 1)
 
+    perf_log.end_timing("Getting form data")
+    perf_log.start_timing("Creating dofmap")
+
     spline_dofmap = np.zeros((len(cells), num_loc_dofs), dtype=np.int32)
+    extraction_dofmap = np.zeros(len(cells), dtype=np.int64)
 
     for cell in cells:
         # Pick the center of interval/quad/hex for the evaluation point
         coord = coords[vertices[cell, :]].sum(axis=0) / 2 ** gdim
         spline_dofmap[cell, :] = (spline.getNodes(coord))
+        extraction_dofmap[cell] = spline.getElement(coord)
+
+    perf_log.end_timing("Creating dofmap")
+    perf_log.start_timing("Allocating vector")
 
     vec = PETSc.Vec(form.mesh.comm)
     vec = vec.createWithArray(np.zeros(spline.getNcp()))
 
+    perf_log.end_timing("Allocating vector")
+    perf_log.start_timing("Packing constants")
+
     consts = dolfinx.cpp.fem.pack_constants(form._cpp_object)
     all_coeffs = dolfinx.cpp.fem.pack_coefficients(form._cpp_object)
 
-    integrals = form.integral_types
+    perf_log.end_timing("Packing constants")
+    perf_log.start_timing("Computing extraction operators")
 
     extraction_operators = spline.get_lagrange_extraction_operators()
 
-    for integral in integrals:
+    perf_log.end_timing("Computing extraction operators")
+    perf_log.start_timing("Assembly step")
+
+    for integral in form.integral_types:
         if integral == dolfinx.fem.IntegralType.cell:
 
             kernel = getattr(
@@ -292,12 +338,16 @@ def assemble_vector(form, spline: AbstractScalarBasis):
                 consts,
                 cells,
                 extraction_operators,
+                extraction_dofmap,
                 bs,
                 set_vec,
                 PETSc.InsertMode.ADD_VALUES
             )
 
     vec.assemble()
+
+    perf_log.end_timing("Assembly step")
+    perf_log.end_timing("Assembling vector")
 
     return vec
 
@@ -314,6 +364,7 @@ def _assemble_vector(
     consts,
     cells,
     extraction_operators,
+    extraction_dofmap,
     bs,
     set_vals,
     mode
@@ -329,9 +380,10 @@ def _assemble_vector(
     # Matrix for the number of variables attached to each dof
     bs_mat = np.ones(bs, dtype=np.float64)
 
-    for k, cell in enumerate(cells):
-        j = cell // extraction_operators[0].shape[0]
-        i = cell % extraction_operators[0].shape[0]
+    for cell in cells:
+        element = extraction_dofmap[cell]
+        i = element // extraction_operators[0].shape[0]
+        j = element % extraction_operators[0].shape[0]
 
         extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
         extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
@@ -484,47 +536,6 @@ def get_csr_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
             index += 1
 
     return index_ptr, indices
-
-
-def ksp_solve_direct(A: PETSc.Mat, b: PETSc.Vec, profile=False):
-    """
-    Solve a linear system
-
-    Args:
-        A (PETSc.Mat): matrix
-        b (PETSc.Vec): right hand side
-
-    Returns:
-        vec (PETSc.Vec): A @ vec = b
-    """
-
-    # Direct solver using mumps
-    ksp = PETSc.KSP().create(A.comm)
-    ksp.setOperators(A)
-    ksp.setType("preonly")
-    ksp.getPC().setType("lu")
-    ksp.getPC().setFactorSolverType("mumps")
-    vec = b.copy()
-
-    if profile:
-        print("-" * 60)
-        print("Using direct solver (MUMPS)")
-        print(f"Matrix size:            {A.size[0]}")
-        info = A.getInfo()
-        print("No. of non-zeros:      ", info["nz_used"])
-        timer = dolfinx.common.Timer()
-
-    ksp.solve(b, vec)
-
-    if profile:
-        print(f"Solve took:             {timer.elapsed()[0]}")
-        print("-" * 60)
-
-    vec.ghostUpdate(
-        addv=PETSc.InsertMode.INSERT,
-        mode=PETSc.ScatterMode.FORWARD,
-    )
-    return vec
 
 
 def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, profile=False, rtol=1e-12):

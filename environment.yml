@@ -9,8 +9,13 @@ dependencies:
   - mpi4py=3.1.6
   - fenics-dolfinx=0.7.3
   - fenics-libdolfinx=0.7.3
+  - fenics-basix=0.7.0
+  - fenics-libbasix=0.7.0
+  - fenics-ufcx=0.7.0
+  - fenics-ufl=2023.2.0
   - scipy
   - numba
+  - petsc4py
   - pip:
       - adios4dolfinx
       - coverage

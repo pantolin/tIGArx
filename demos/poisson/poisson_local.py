@@ -146,12 +146,6 @@ def run_poisson():
         L_form = dolfinx.fem.form(L)
         vec = assemble_vector(L_form, splineMesh.getScalarSpline())
 
-        if mpirank == 0:
-            for i in range(mat.size[0]):
-                for j in range(mat.size[1]):
-                    print(mat[i, j], end=" ")
-                print()
-
         sideDofs = []
         for parametricDirection in [0, 1]:
             for side in [0, 1]:

@@ -2,7 +2,6 @@ import ctypes
 
 import numpy as np
 import numba as nb
-import petsc4py.PETSc
 
 import dolfinx.fem.petsc
 
@@ -42,7 +41,7 @@ set_vec.argtypes = [
 ]
 
 
-def assemble_matrix(form, spline: AbstractScalarBasis):
+def assemble_matrix(form: dolfinx.fem.Form, spline: AbstractScalarBasis):
     """
     Assemble matrix
 
@@ -60,9 +59,12 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
 
     cells = np.arange(form.mesh.topology.original_cell_index.size, dtype=np.int32)
     bs = form.function_spaces[0].dofmap.index_map_bs
-    num_loc_dofs = bs
+
+    num_loc_points = 1
     for _ in range(gdim):
-        num_loc_dofs *= (spline.getDegree() + 1)
+        num_loc_points *= (spline.getDegree() + 1)
+
+    num_loc_dofs = num_loc_points * bs
 
     perf_log.end_timing("Getting form data")
     perf_log.start_timing("Creating dofmap")
@@ -110,6 +112,11 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
     extraction_operators = spline.get_lagrange_extraction_operators()
 
     perf_log.end_timing("Computing extraction operators")
+    perf_log.start_timing("DOF permutation")
+
+    permutation = get_lagrange_permutation(form, spline.getDegree(), gdim, bs)
+
+    perf_log.end_timing("DOF permutation")
     perf_log.start_timing("Assembly step")
 
     for integral in form.integral_types:
@@ -121,8 +128,8 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
             )
             coeffs = all_coeffs[(integral, -1)]
 
-            _assemble_cells(
-                mat,
+            assemble_cells(
+                mat.handle,
                 kernel,
                 vertices,
                 coords,
@@ -133,7 +140,10 @@ def assemble_matrix(form, spline: AbstractScalarBasis):
                 cells,
                 extraction_operators,
                 extraction_dofmap,
+                permutation,
                 bs,
+                set_mat,
+                PETSc.InsertMode.ADD_VALUES
             )
 
     mat.assemble()
@@ -156,6 +166,7 @@ def _assemble_cells(
     cells,
     extraction_operators,
     extraction_dofmap,
+    permutation,
     bs,
 ):
     # Initialize
@@ -174,8 +185,8 @@ def _assemble_cells(
         i = element // extraction_operators[0].shape[0]
         j = element % extraction_operators[0].shape[0]
 
-        extraction_j = np.ascontiguousarray(extraction_operators[0][i, :, :])
-        extraction_i = np.ascontiguousarray(extraction_operators[1][j, :, :])
+        extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
+        extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
 
         extraction_kron = np.kron(extraction_i, extraction_j)
         full_kron = np.kron(extraction_kron, bs_mat)
@@ -193,7 +204,8 @@ def _assemble_cells(
             ffi.from_buffer(perm),
         )
 
-        A_local = np.matmul(full_kron, np.matmul(A_local, full_kron.T))
+        A_local = A_local[permutation, :][:, permutation]
+        A_local = full_kron @ A_local @ full_kron.T
 
         mat.setValues(pos, pos, A_local, PETSc.InsertMode.ADD_VALUES)
 
@@ -211,6 +223,7 @@ def assemble_cells(
     cells,
     extraction_operators,
     extraction_dofmap,
+    permutation,
     bs,
     set_vals,
     mode
@@ -250,16 +263,16 @@ def assemble_cells(
             ffi.from_buffer(perm),
         )
 
+        A_local = A_local[permutation, :][:, permutation]
         A_local = full_kron @ A_local @ full_kron.T
 
-        # Using ffi here as a "hack" to avoid ctypes python function
         set_vals(
             mat_handle,
             num_loc_dofs,
-            ffi.from_buffer(pos),
+            pos.ctypes,
             num_loc_dofs,
-            ffi.from_buffer(pos),
-            ffi.from_buffer(A_local),
+            pos.ctypes,
+            A_local.ctypes,
             mode
         )
 
@@ -316,6 +329,11 @@ def assemble_vector(form, spline: AbstractScalarBasis):
     extraction_operators = spline.get_lagrange_extraction_operators()
 
     perf_log.end_timing("Computing extraction operators")
+    perf_log.start_timing("DOF permutation")
+
+    permutation = get_lagrange_permutation(form, spline.getDegree(), gdim, bs)
+
+    perf_log.end_timing("DOF permutation")
     perf_log.start_timing("Assembly step")
 
     for integral in form.integral_types:
@@ -339,6 +357,7 @@ def assemble_vector(form, spline: AbstractScalarBasis):
                 cells,
                 extraction_operators,
                 extraction_dofmap,
+                permutation,
                 bs,
                 set_vec,
                 PETSc.InsertMode.ADD_VALUES
@@ -365,6 +384,7 @@ def _assemble_vector(
     cells,
     extraction_operators,
     extraction_dofmap,
+    permutation,
     bs,
     set_vals,
     mode
@@ -404,14 +424,15 @@ def _assemble_vector(
             ffi.from_buffer(perm),
         )
 
+        vec_local = vec_local[permutation]
         vec_local = full_kron @ vec_local
 
         # vec.setValues(pos, vec_local, PETSc.InsertMode.ADD_VALUES)
         set_vals(
             vec,
             num_loc_dofs,
-            ffi.from_buffer(pos),
-            ffi.from_buffer(vec_local),
+            pos.ctypes,
+            vec_local.ctypes,
             mode
         )
 
@@ -433,6 +454,45 @@ def get_vertices(mesh: dolfinx.mesh.Mesh):
     vertices = mesh.geometry.dofmap.reshape(num_cells, -1)
 
     return vertices, coords, gdim
+
+
+def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int, bs: int = 1):
+    """
+    Get permutation for Lagrange basis
+
+    Args:
+        form (dolfinx.fem.Form): form object
+        deg (int): degree of the basis
+        gdim (int): mesh dimension`
+        bs (int, optional): number of variables attached to each dof. Default is 1.
+    Returns:
+        permutation (np.array): permutation array
+    """
+    dof_coords = form.function_spaces[0].element.basix_element.points
+    permutation = np.zeros(dof_coords.shape[0], dtype=np.uint32)
+    
+    if gdim == 1:
+        for ind, coord in enumerate(dof_coords):
+            index = int(coord[0] * deg)
+            permutation[index] = ind
+
+    elif gdim == 2:
+        for ind, coord in enumerate(dof_coords):
+            index_i = int(coord[0] * deg)
+            index_j = int(coord[1] * deg)
+            permutation[index_j * (deg + 1) + index_i] = ind
+    
+    elif gdim == 3:
+        for ind, coord in enumerate(dof_coords):
+            index_i = int(coord[0] * deg)
+            index_j = int(coord[1] * deg)
+            index_k = int(coord[2] * deg)
+            permutation[index_k * (deg + 1) ** 2 + index_j * (deg + 1) + index_i] = ind
+            
+    else:
+        raise ValueError("Invalid mesh dimension")
+    
+    return permutation.repeat(bs)
 
 
 def lock_inactive_dofs(inactive_dofs: list[np.int32], A: PETSc.Mat, alpha: float):

@@ -19,7 +19,7 @@ def run_poisson():
     # Number of levels of refinement with which to run the Poisson problem.
     # (Note: Paraview output files will correspond to the last/highest level
     # of refinement.)
-    N_LEVELS = 4
+    N_LEVELS = 3
 
     # Array to store error at different refinement levels:
     L2_errors = np.zeros(N_LEVELS)
@@ -32,24 +32,34 @@ def run_poisson():
         # each parametric direction.  By changing these and recording the error,
         # it is easy to see that the discrete solutions converge at optimal rates
         # under refinement.
-        p = 4
-        q = 4
-        NELu = 10 * (2**level)
-        NELv = 10 * (2**level)
+        p = 2
+        q = 2
+        r = 2
+        NELu = 8 * (2**level)
+        NELv = 8 * (2**level)
+        NELw = 8 * (2**level)
 
         # Parameters determining the position and size of the domain.
         x0 = 0.0
         y0 = 0.0
+        z0 = 0.0
+
         Lx = 1.0
         Ly = 1.0
+        Lz = 1.0
 
-        perf_log.start_timing("Dimension: " + str(NELu) + " x " + str(NELv), True)
+        perf_log.start_timing("Dimension: " + str(NELu) + " x "
+                              + str(NELv) + " x " + str(NELw), True)
         perf_log.start_timing("Generating control mesh")
 
         # Create a control mesh for which $\Omega = \widehat{\Omega}$.
         splineMesh = ExplicitBSplineControlMesh(
-            [p, q], [uniform_knots(p, x0, x0 + Lx, NELu),
-                     uniform_knots(q, y0, y0 + Ly, NELv)]
+            [p, q, r],
+            [
+                uniform_knots(p, x0, x0 + Lx, NELu),
+                uniform_knots(q, y0, y0 + Ly, NELv),
+                uniform_knots(q, z0, z0 + Lz, NELw)
+            ]
         )
 
         perf_log.end_timing("Generating control mesh")
@@ -58,7 +68,6 @@ def run_poisson():
         # Create a spline generator for a spline with a single scalar field on the
         # given control mesh, where the scalar field is the same as the one used
         # to determine the mapping $\mathbf{F}:\widehat{\Omega}\to\Omega$.
-        # FIXME
         splineGenerator = EqualOrderSpline(1, splineMesh)
         # splineGenerator = EqualOrderSpline(2, splineMesh)
 
@@ -69,7 +78,7 @@ def run_poisson():
         # ends of the domain, in both directions.
         field = 0
         scalarSpline = splineGenerator.getScalarSpline(field)
-        for parametricDirection in [0, 1]:
+        for parametricDirection in [0, 1, 2]:
             for side in [0, 1]:
                 side_dofs = scalarSpline.getSideDofs(parametricDirection, side)
                 splineGenerator.addZeroDofs(field, side_dofs)
@@ -88,11 +97,6 @@ def run_poisson():
         #     return (near(x[0],x0) or near(x[0],x0+Lx)
         #             or near(x[1],y0) or near(x[1],y0+Ly))
         # splineGenerator.addZeroDofsByLocation(get_boundary(),field)
-
-        # Write extraction data to the filesystem.
-        DIR = "./extraction"
-        # FIXME to uncomment.
-        # splineGenerator.writeExtraction(DIR)
 
         ####### Analysis #######
 
@@ -126,7 +130,8 @@ def run_poisson():
         # Create a force, f, to manufacture the solution, soln
         x = spline.spatialCoordinates()
         soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * \
-            ufl.sin(ufl.pi * (x[1] - y0) / Ly)
+            ufl.sin(ufl.pi * (x[1] - y0) / Ly) * \
+            ufl.sin(ufl.pi * (x[2] - z0) / Lz)
         f = -spline.div(spline.grad(soln))
 
         # Set up and solve the Poisson problem
@@ -137,7 +142,7 @@ def run_poisson():
 
         perf_log.end_timing("Setting up problem")
         side_dofs = []
-        for parametricDirection in [0, 1]:
+        for parametricDirection in [0, 1, 2]:
             for side in [0, 1]:
                 side_dofs.append(scalarSpline.getSideDofs(parametricDirection, side))
 
@@ -159,16 +164,10 @@ def run_poisson():
         # convert the values at control points to the values at dofs
 
         # perf_log.end_timing("Solve problem")
-        perf_log.end_timing("Dimension: " + str(NELu) + " x " + str(NELv))
+        perf_log.end_timing("Dimension: " + str(NELu) + " x "
+                            + str(NELv) + " x " + str(NELw), True)
 
         ####### Postprocessing #######
-
-        # The solution, u, is in the homogeneous representation, but, again, for
-        # B-splines with weight=1, this is the same as the physical representation.
-        with dolfinx.io.VTXWriter(spline.mesh.comm,
-                                  "results/u.bp",
-                                  [u]) as vtx:
-            vtx.write(0.0)
 
         # Compute and print the $L^2$ error in the discrete solution.
         L2_error_local = dolfinx.fem.assemble_scalar(

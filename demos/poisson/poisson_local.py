@@ -4,7 +4,8 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalAssembly import assemble_matrix, assemble_vector, ksp_solve_iteratively
+from tIGArx.LocalAssembly import assemble_matrix, assemble_vector, \
+    ksp_solve_iteratively, solve_linear_variational_problem
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
@@ -72,8 +73,8 @@ def run_poisson():
         scalarSpline = splineGenerator.getScalarSpline(field)
         for parametricDirection in [0, 1]:
             for side in [0, 1]:
-                sideDofs = scalarSpline.getSideDofs(parametricDirection, side)
-                splineGenerator.addZeroDofs(field, sideDofs)
+                side_dofs = scalarSpline.getSideDofs(parametricDirection, side)
+                splineGenerator.addZeroDofs(field, side_dofs)
 
         perf_log.end_timing("Setting Dirichlet bcs")
         perf_log.start_timing("Setting up extracted spline")
@@ -114,7 +115,6 @@ def run_poisson():
         # spline = ExtractedSpline(DIR,QUAD_DEG)
 
         perf_log.end_timing("Setting up extracted spline")
-        perf_log.start_timing("Solving", True)
         perf_log.start_timing("Setting up problem")
 
         # Homogeneous coordinate representation of the trial function u.  Because
@@ -138,31 +138,17 @@ def run_poisson():
         u.name = "u"
 
         perf_log.end_timing("Setting up problem")
-        perf_log.start_timing("Assembling problem")
-
-        # Assemble the linear system.
-        a_form = dolfinx.fem.form(a)
-        mat = assemble_matrix(a_form, splineMesh.getScalarSpline())
-        L_form = dolfinx.fem.form(L)
-        vec = assemble_vector(L_form, splineMesh.getScalarSpline())
-
-        sideDofs = []
+        side_dofs = []
         for parametricDirection in [0, 1]:
             for side in [0, 1]:
-                sideDofs.append(scalarSpline.getSideDofs(parametricDirection, side))
+                side_dofs.append(scalarSpline.getSideDofs(parametricDirection, side))
 
         # Filter for unique dofs
-        sideDofs = np.unique(np.concatenate(sideDofs))
-        sideDofs = list(sideDofs)
-        # Apply Dirichlet BCs
+        side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
+        dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
 
-        mat.zeroRowsColumns(sideDofs, 1.0)
-        vec.setValues(sideDofs, np.zeros(len(sideDofs), dtype=np.float64))
-
-        perf_log.end_timing("Assembling problem")
-        perf_log.start_timing("Solve problem")
-
-        cp_sol = ksp_solve_iteratively(mat, vec)
+        bcs = {"dirichlet": (side_dofs, dofs_values)}
+        cp_sol = solve_linear_variational_problem(a, L, scalarSpline, bcs, profile=True)
 
         # Using the global matrix because it is available, the same
         # effect could be achieved by evaluating the splines at the
@@ -174,8 +160,7 @@ def run_poisson():
 
         # convert the values at control points to the values at dofs
 
-        perf_log.end_timing("Solve problem")
-        perf_log.end_timing("Solving")
+        # perf_log.end_timing("Solve problem")
         perf_log.end_timing("Dimension: " + str(NELu) + " x " + str(NELv))
 
         ####### Postprocessing #######

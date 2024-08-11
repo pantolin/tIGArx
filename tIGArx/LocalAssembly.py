@@ -263,6 +263,7 @@ def assembly_kernel(
                     extraction_dofmap,
                     permutation,
                     bs,
+                    gdim,
                     set_mat,
                     PETSc.InsertMode.ADD_VALUES
                 )
@@ -282,6 +283,7 @@ def assembly_kernel(
                     extraction_dofmap,
                     permutation,
                     bs,
+                    gdim,
                     set_vec,
                     PETSc.InsertMode.ADD_VALUES
                 )
@@ -310,33 +312,54 @@ def _assemble_matrix(
         coeffs,
         consts,
         cells,
-        extraction_operators,
+        operators,
         extraction_dofmap,
         permutation,
         bs,
+        gdim,
         set_vals,
         mode
 ):
     # Initialize
     num_loc_vertices = vertices.shape[1]
     cell_coords = np.zeros((num_loc_vertices, 3))
-    mat_local = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
     entity_local_index = np.array([0], dtype=np.intc)
 
     # Don't permute
     perm = np.array([0], dtype=np.uint8)
 
+    mat_local = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
     bs_mat = np.ones(bs, dtype=PETSc.ScalarType)
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        i = element // extraction_operators[0].shape[0]
-        j = element % extraction_operators[0].shape[0]
+        extraction_kron: np.ndarray
 
-        extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
-        extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
+        if gdim == 1:
+            i = element
+            extraction_kron = np.ascontiguousarray(operators[0][i, :, :])
 
-        extraction_kron = np.kron(extraction_i, extraction_j)
+        elif gdim == 2:
+            i = element // operators[0].shape[0]
+            j = element % operators[0].shape[0]
+
+            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
+            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
+
+            extraction_kron = np.kron(extraction_i, extraction_j)
+
+        else:
+            i = element // (operators[0].shape[0] * operators[1].shape[0])
+            j = (element // operators[1].shape[0]) % operators[0].shape[0]
+            k = element % operators[1].shape[0]
+
+            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
+            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
+            extraction_k = np.ascontiguousarray(operators[2][k, :, :])
+
+            extraction_kron = np.kron(extraction_i, extraction_j)
+            extraction_kron = np.kron(extraction_kron, extraction_k)
+
         full_kron = np.kron(extraction_kron, bs_mat)
 
         pos = dofmap[cell, :]
@@ -379,10 +402,11 @@ def _assemble_vector(
         coeffs,
         consts,
         cells,
-        extraction_operators,
+        operators,
         extraction_dofmap,
         permutation,
         bs,
+        gdim,
         set_vals,
         mode
 ):
@@ -399,13 +423,33 @@ def _assemble_vector(
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        i = element // extraction_operators[0].shape[0]
-        j = element % extraction_operators[0].shape[0]
+        extraction_kron: np.ndarray
 
-        extraction_i = np.ascontiguousarray(extraction_operators[0][i, :, :])
-        extraction_j = np.ascontiguousarray(extraction_operators[1][j, :, :])
+        if gdim == 1:
+            i = element
+            extraction_kron = np.ascontiguousarray(operators[0][i, :, :])
 
-        extraction_kron = np.kron(extraction_i, extraction_j)
+        elif gdim == 2:
+            i = element // operators[0].shape[0]
+            j = element % operators[0].shape[0]
+
+            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
+            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
+
+            extraction_kron = np.kron(extraction_i, extraction_j)
+
+        else:
+            i = element // (operators[0].shape[0] * operators[1].shape[0])
+            j = (element // operators[1].shape[0]) % operators[0].shape[0]
+            k = element % operators[1].shape[0]
+
+            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
+            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
+            extraction_k = np.ascontiguousarray(operators[2][k, :, :])
+
+            extraction_kron = np.kron(extraction_i, extraction_j)
+            extraction_kron = np.kron(extraction_kron, extraction_k)
+
         full_kron = np.kron(extraction_kron, bs_mat)
 
         pos = dofmap[cell, :]

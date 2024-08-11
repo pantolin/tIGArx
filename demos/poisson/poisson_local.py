@@ -11,7 +11,7 @@ from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
 from tIGArx.ExtractedSpline import ExtractedSpline
 from tIGArx.MultiFieldSplines import EqualOrderSpline
-from tIGArx.utils import perf_log
+from tIGArx.timing_util import perf_log
 
 
 def run_poisson():
@@ -34,8 +34,8 @@ def run_poisson():
         # each parametric direction.  By changing these and recording the error,
         # it is easy to see that the discrete solutions converge at optimal rates
         # under refinement.
-        p = 3
-        q = 3
+        p = 4
+        q = 4
         NELu = 10 * (2**level)
         NELv = 10 * (2**level)
 

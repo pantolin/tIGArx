@@ -16,7 +16,7 @@ from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
 from tIGArx.ExtractedSpline import ExtractedSpline
 from tIGArx.MultiFieldSplines import EqualOrderSpline
-from tIGArx.utils import perf_log
+from tIGArx.timing_util import perf_log
 
 
 def run_poisson():

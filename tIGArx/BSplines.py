@@ -634,6 +634,67 @@ class BSpline(AbstractScalarBasis):
                         ]
             return retval
 
+    def getNodes(self, xi):
+        ret_nodes = []
+
+        if self.nvar == 1:
+            u = xi[0]
+            nodes = self.splines[0].getNodes(u)
+
+            for i in range(0, len(nodes)):
+                ret_nodes.append(nodes[i])
+
+        elif self.nvar == 2:
+            u = xi[0]
+            v = xi[1]
+
+            uspline = self.splines[0]
+            vspline = self.splines[1]
+
+            nodesu = uspline.getNodes(u)
+            nodesv = vspline.getNodes(v)
+
+            ret_nodes = np.zeros(len(nodesu) * len(nodesv), dtype=np.int32)
+
+            for i in range(0, len(nodesu)):
+                for j in range(0, len(nodesv)):
+                    ret_nodes[i * len(nodesv) + j] = (
+                        ij2dof(nodesu[i], nodesv[j], uspline.getNcp())
+                    )
+
+        else:
+            u = xi[0]
+            v = xi[1]
+            w = xi[2]
+
+            uspline = self.splines[0]
+            vspline = self.splines[1]
+            wspline = self.splines[2]
+
+            nodesu = np.array(uspline.getNodes(u))
+            nodesv = np.array(vspline.getNodes(v))
+            nodesw = np.array(wspline.getNodes(w))
+            ret_nodes = np.zeros(len(nodesu) * len(nodesv) * len(nodesw), dtype=np.int32)
+
+            n_u = len(nodesu)
+            n_v = len(nodesv)
+            n_w = len(nodesw)
+
+            for i in range(0, n_u):
+                for j in range(0, n_v):
+                    for k in range(0, n_w):
+                        ret_nodes[i * n_v * n_w + j * n_w + k] = (
+                            ijk2dof(
+                                nodesu[i],
+                                nodesv[j],
+                                nodesw[k],
+                                uspline.getNcp(),
+                                vspline.getNcp(),
+                            )
+                        )
+
+        return ret_nodes
+
     def generateMesh(self, comm=worldcomm):
         if self.nvar == 1:
             spline = self.splines[0]

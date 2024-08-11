@@ -11,7 +11,7 @@ from cffi import FFI
 from petsc4py import PETSc
 
 from tIGArx.SplineInterface import AbstractScalarBasis
-from tIGArx.utils import perf_log
+from tIGArx.timing_util import perf_log
 
 ffi = FFI()
 
@@ -46,8 +46,8 @@ def solve_linear_variational_problem(
         rhs: ufl.form.Form,
         spline: AbstractScalarBasis,
         bcs: dict[str, [np.ndarray, np.ndarray]],
-        profile=False,
         rtol=1e-12,
+        profile=False,
 ) -> PETSc.Vec:
     """
     Solve the linear variational problem using the given forms and
@@ -98,7 +98,7 @@ def solve_linear_variational_problem(
         perf_log.end_timing("Applying boundary conditions")
         perf_log.start_timing("Solving problem")
 
-    sol = ksp_solve_iteratively(mat, vec, profile, rtol)
+    sol = ksp_solve_iteratively(mat, vec, rtol=rtol)
 
     if profile:
         perf_log.end_timing("Solving problem")
@@ -550,7 +550,7 @@ def get_csr_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
     return index_ptr, indices
 
 
-def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, profile=False, rtol=1e-12):
+def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, debug=False, rtol=1e-12):
     """
     Solve the linear system Ax = b using Conjugate Gradient
     and block JACOBI preconditioning.
@@ -575,7 +575,7 @@ def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, profile=False, rtol=1e-12)
     ksp.setTolerances(rtol=rtol)
 
     vec = b.copy()
-    if profile:
+    if debug:
         print("-" * 60)
         print("Using CG solver with BJACOBI preconditioning")
         print(f"Matrix size:            {A.getSize()[0]}")
@@ -586,7 +586,7 @@ def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, profile=False, rtol=1e-12)
 
     ksp.solve(b, vec)
 
-    if profile:
+    if debug:
         print(f"Solve took:             {timer.stop()}")
         print("-" * 60)
 

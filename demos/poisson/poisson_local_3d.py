@@ -35,9 +35,9 @@ def run_poisson():
         p = 2
         q = 2
         r = 2
-        NELu = 8 * (2**level)
-        NELv = 8 * (2**level)
-        NELw = 8 * (2**level)
+        NELu = 4 * (2**level)
+        NELv = 4 * (2**level)
+        NELw = 4 * (2**level)
 
         # Parameters determining the position and size of the domain.
         x0 = 0.0
@@ -58,7 +58,7 @@ def run_poisson():
             [
                 uniform_knots(p, x0, x0 + Lx, NELu),
                 uniform_knots(q, y0, y0 + Ly, NELv),
-                uniform_knots(q, z0, z0 + Lz, NELw)
+                uniform_knots(r, z0, z0 + Lz, NELw)
             ]
         )
 
@@ -103,7 +103,7 @@ def run_poisson():
         # Choose the quadrature degree to be used throughout the analysis.
         # In IGA, especially with rational spline spaces, under-integration is a
         # fact of life, but this does not impair optimal convergence.
-        QUAD_DEG = 2 * max(p, q)
+        QUAD_DEG = 3 * max(p, q)
 
         # Create the extracted spline directly from the generator.
         # As of version 2019.1, this is required for using quad/hex elements in

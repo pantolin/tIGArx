@@ -161,7 +161,7 @@ def assembly_kernel(
 
     vertices, coords, gdim = get_vertices(form.mesh)
 
-    cells = form.mesh.topology.original_cell_index
+    cells = np.arange(form.mesh.topology.original_cell_index.size, dtype=np.int32)
     bs = form.function_spaces[0].dofmap.index_map_bs
     num_loc_dofs = bs
     for _ in range(gdim):
@@ -177,7 +177,7 @@ def assembly_kernel(
     for cell in cells:
         # Pick the center of interval/quad/hex for the evaluation point
         coord = coords[vertices[cell, :]].sum(axis=0) / 2 ** gdim
-        spline_dofmap[cell, :] = (spline.getNodes(coord))
+        spline_dofmap[cell, :] = spline.getNodes(coord)
         extraction_dofmap[cell] = spline.getElement(coord)
 
     if profile:
@@ -338,27 +338,25 @@ def _assemble_matrix(
         if gdim == 1:
             i = element
             extraction_kron = np.ascontiguousarray(operators[0][i, :, :])
-
         elif gdim == 2:
-            i = element // operators[0].shape[0]
-            j = element % operators[0].shape[0]
+            i = element % operators[0].shape[0]
+            j = element // operators[0].shape[0]
 
             extraction_i = np.ascontiguousarray(operators[0][i, :, :])
             extraction_j = np.ascontiguousarray(operators[1][j, :, :])
 
             extraction_kron = np.kron(extraction_i, extraction_j)
-
         else:
-            i = element // (operators[0].shape[0] * operators[1].shape[0])
-            j = (element // operators[1].shape[0]) % operators[0].shape[0]
-            k = element % operators[1].shape[0]
+            ij = element % (operators[0].shape[0] * operators[1].shape[0])
+            k = element // (operators[0].shape[0] * operators[1].shape[0])
+            i = ij % operators[0].shape[0]
+            j = ij // operators[0].shape[0]
 
             extraction_i = np.ascontiguousarray(operators[0][i, :, :])
             extraction_j = np.ascontiguousarray(operators[1][j, :, :])
             extraction_k = np.ascontiguousarray(operators[2][k, :, :])
 
-            extraction_kron = np.kron(extraction_i, extraction_j)
-            extraction_kron = np.kron(extraction_kron, extraction_k)
+            extraction_kron = np.kron(np.kron(extraction_i, extraction_j), extraction_k)
 
         full_kron = np.kron(extraction_kron, bs_mat)
 
@@ -428,27 +426,25 @@ def _assemble_vector(
         if gdim == 1:
             i = element
             extraction_kron = np.ascontiguousarray(operators[0][i, :, :])
-
         elif gdim == 2:
-            i = element // operators[0].shape[0]
-            j = element % operators[0].shape[0]
+            i = element % operators[0].shape[0]
+            j = element // operators[0].shape[0]
 
             extraction_i = np.ascontiguousarray(operators[0][i, :, :])
             extraction_j = np.ascontiguousarray(operators[1][j, :, :])
 
             extraction_kron = np.kron(extraction_i, extraction_j)
-
         else:
-            i = element // (operators[0].shape[0] * operators[1].shape[0])
-            j = (element // operators[1].shape[0]) % operators[0].shape[0]
-            k = element % operators[1].shape[0]
+            ij = element % (operators[0].shape[0] * operators[1].shape[0])
+            k = element // (operators[0].shape[0] * operators[1].shape[0])
+            i = ij % operators[0].shape[0]
+            j = ij // operators[0].shape[0]
 
             extraction_i = np.ascontiguousarray(operators[0][i, :, :])
             extraction_j = np.ascontiguousarray(operators[1][j, :, :])
             extraction_k = np.ascontiguousarray(operators[2][k, :, :])
 
-            extraction_kron = np.kron(extraction_i, extraction_j)
-            extraction_kron = np.kron(extraction_kron, extraction_k)
+            extraction_kron = np.kron(np.kron(extraction_i, extraction_j), extraction_k)
 
         full_kron = np.kron(extraction_kron, bs_mat)
 
@@ -521,14 +517,14 @@ def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int, bs: in
         for ind, coord in enumerate(dof_coords):
             index_i = int(coord[0] * deg)
             index_j = int(coord[1] * deg)
-            permutation[index_j * (deg + 1) + index_i] = ind
+            permutation[index_i * (deg + 1) + index_j] = ind
 
     elif gdim == 3:
         for ind, coord in enumerate(dof_coords):
             index_i = int(coord[0] * deg)
             index_j = int(coord[1] * deg)
             index_k = int(coord[2] * deg)
-            permutation[index_k * (deg + 1) ** 2 + index_j * (deg + 1) + index_i] = ind
+            permutation[index_i * (deg + 1) ** 2 + index_j * (deg + 1) + index_k] = ind
 
     else:
         raise ValueError("Invalid mesh dimension")

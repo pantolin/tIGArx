@@ -12,6 +12,7 @@ import ufl
 
 from mpi4py import MPI
 
+from tIGArx.LocalAssembly import solve_linear_variational_problem
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
@@ -25,7 +26,7 @@ def run_elasticity():
     # Number of levels of refinement with which to run the Elasticity problem.
     # (Note: Paraview output files will correspond to the last/highest level
     # of refinement.)
-    N_LEVELS = 3
+    N_LEVELS = 4
 
     # Array to store error at different refinement levels:
     L2_errors = np.zeros(N_LEVELS)
@@ -42,8 +43,8 @@ def run_elasticity():
         # under refinement.
         p = 3
         q = 3
-        NELu = 10 * (2**level)
-        NELv = 10 * (2**level)
+        NELu = 8 * (2**level)
+        NELv = 8 * (2**level)
 
         # Material parameters
         E = 1000.0
@@ -163,7 +164,27 @@ def run_elasticity():
         perf_log.end_timing("Setting up problem")
         perf_log.start_timing("Solve problem")
 
-        spline.solveLinearVariationalProblem(a == L, u)
+        # spline.solveLinearVariationalProblem(a == L, u)
+
+        side_dofs = []
+        for parametricDirection in [0, 1]:
+            for side in [0, 1]:
+                side_dofs.append(scalarSpline.getSideDofs(parametricDirection, side))
+
+        # Filter for unique dofs
+        side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
+        dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
+
+        bcs = {"dirichlet": (side_dofs, dofs_values)}
+        cp_sol = solve_linear_variational_problem(a, L, scalarSpline, bcs, profile=True)
+
+        # Using the global matrix because it is available, the same
+        # effect could be achieved by evaluating the splines at the
+        # desired points and multiplying by the control point
+        # contribution to the solution.
+        sol = splineGenerator.M * cp_sol
+        size = u.x.index_map.size_local
+        u.x.array[:size] = sol.array_r
 
         perf_log.end_timing("Solve problem")
         perf_log.end_timing("Solving")

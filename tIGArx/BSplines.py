@@ -656,9 +656,9 @@ class BSpline(AbstractScalarBasis):
 
             ret_nodes = np.zeros(len(nodesu) * len(nodesv), dtype=np.int32)
 
-            for i in range(0, len(nodesu)):
-                for j in range(0, len(nodesv)):
-                    ret_nodes[i * len(nodesv) + j] = (
+            for j in range(0, len(nodesv)):
+                for i in range(0, len(nodesu)):
+                    ret_nodes[i * len(nodesu) + j] = (
                         ij2dof(nodesu[i], nodesv[j], uspline.getNcp())
                     )
 
@@ -778,7 +778,7 @@ class BSpline(AbstractScalarBasis):
             vspline = self.splines[1]
             spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
             spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
-            return spanu * vspline.nel + spanv
+            return ij2dof(spanu, spanv, uspline.nel)
         else:
             u = xi[0]
             v = xi[1]
@@ -789,7 +789,7 @@ class BSpline(AbstractScalarBasis):
             spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
             spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
             spanw = wspline.getKnotSpan(w) - wspline.multiplicities[0] + 1
-            return spanu * vspline.nel * wspline.nel + spanv * wspline.nel + spanw
+            return ijk2dof(spanu, spanv, spanw, uspline.nel, vspline.nel)
 
 
     def get_lagrange_extraction_operators(self) -> list[np.ndarray]:

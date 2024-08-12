@@ -34,8 +34,8 @@ def run_poisson():
         # under refinement.
         p = 4
         q = 4
-        NELu = 10 * (2**level)
-        NELv = 10 * (2**level)
+        NELu = 8 * (2**level)
+        NELv = 8 * (2**level)
 
         # Parameters determining the position and size of the domain.
         x0 = 0.0

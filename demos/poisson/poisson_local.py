@@ -5,7 +5,8 @@ import ufl
 from mpi4py import MPI
 
 from tIGArx.LocalAssembly import assemble_matrix, assemble_vector, \
-    ksp_solve_iteratively, solve_linear_variational_problem
+    ksp_solve_iteratively, solve_linear_variational_problem, \
+    dolfinx_assemble_linear_variational_problem
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
@@ -155,6 +156,8 @@ def run_poisson():
         sol = splineGenerator.M * cp_sol
         size = u.x.index_map.size_local
         u.x.array[:size] = sol.array_r
+
+        dolfinx_assemble_linear_variational_problem(a, L, profile=True)
 
         # convert the values at control points to the values at dofs
 

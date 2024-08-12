@@ -40,6 +40,13 @@ set_vec.argtypes = [
     ctypes.c_int,
 ]
 
+options = {
+    "cffi_extra_compile_args": [
+        "-O3", "-march=native", "-mtune=native", "-ffast-math"
+    ],
+    "cffi_verbose": True
+}
+
 
 def solve_linear_variational_problem(
         lhs: ufl.form.Form,
@@ -71,8 +78,8 @@ def solve_linear_variational_problem(
         perf_log.start_timing("Solving linear problem", True)
         perf_log.start_timing("Assembling problem", True)
 
-    lhs_form = dolfinx.fem.form(lhs)
-    rhs_form = dolfinx.fem.form(rhs)
+    lhs_form = dolfinx.fem.form(lhs, jit_options=options)
+    rhs_form = dolfinx.fem.form(rhs, jit_options=options)
 
     mat = assemble_matrix(lhs_form, spline, profile)
     vec = assemble_vector(rhs_form, spline, profile)
@@ -517,7 +524,8 @@ def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int, bs: in
         for ind, coord in enumerate(dof_coords):
             index_i = int(coord[0] * deg)
             index_j = int(coord[1] * deg)
-            permutation[index_i * (deg + 1) + index_j] = ind
+            # TODO - investigate why j goes before i here
+            permutation[index_j * (deg + 1) + index_i] = ind
 
     elif gdim == 3:
         for ind, coord in enumerate(dof_coords):
@@ -636,3 +644,26 @@ def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, debug=False, rtol=1e-12):
     )
 
     return vec
+
+
+def dolfinx_assemble_linear_variational_problem(
+        lhs: ufl.form.Form,
+        rhs: ufl.form.Form,
+        profile=False,
+) -> PETSc.Vec:
+    """
+    Test of reference dolfinx tensor assembly time
+    """
+    if profile:
+        perf_log.start_timing("Dolfinx assembly", True)
+
+    lhs_form = dolfinx.fem.form(lhs, jit_options=options)
+    rhs_form = dolfinx.fem.form(rhs, jit_options=options)
+
+    mat = dolfinx.fem.assemble_matrix(lhs_form)
+    vec = dolfinx.fem.assemble_vector(rhs_form)
+
+    if profile:
+        perf_log.end_timing("Dolfinx assembly")
+
+    return mat, vec

@@ -651,14 +651,13 @@ class BSpline(AbstractScalarBasis):
             uspline = self.splines[0]
             vspline = self.splines[1]
 
-            nodesu = uspline.getNodes(u)
-            nodesv = vspline.getNodes(v)
-
+            nodesu = np.array(uspline.getNodes(u))
+            nodesv = np.array(vspline.getNodes(v))
             ret_nodes = np.zeros(len(nodesu) * len(nodesv), dtype=np.int32)
 
-            for j in range(0, len(nodesv)):
-                for i in range(0, len(nodesu)):
-                    ret_nodes[i * len(nodesu) + j] = (
+            for i in range(0, len(nodesu)):
+                for j in range(0, len(nodesv)):
+                    ret_nodes[i * len(nodesv) + j] = (
                         ij2dof(nodesu[i], nodesv[j], uspline.getNcp())
                     )
 

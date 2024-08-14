@@ -12,7 +12,7 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalAssembly import solve_linear_variational_problem, repeat_and_increment, \
+from tIGArx.LocalAssembly import solve_linear_variational_problem, stack_and_shift, \
     dolfinx_assemble_linear_variational_problem
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
@@ -191,7 +191,7 @@ def run_elasticity():
 
         # Filter for unique dofs
         side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
-        side_dofs = repeat_and_increment(side_dofs, 3, scalarSpline.getNcp())
+        side_dofs = stack_and_shift(side_dofs, 3, scalarSpline.getNcp())
         side_dofs = np.array(side_dofs, dtype=np.int32)
         dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
 

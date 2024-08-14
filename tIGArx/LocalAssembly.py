@@ -189,7 +189,7 @@ def assembly_kernel(
         # Pick the center of interval/quad/hex for the evaluation point
         coord = coords[vertices[cell, :]].sum(axis=0) / 2 ** gdim
 
-        spline_dofmap[cell, :] = expand_and_increment(
+        spline_dofmap[cell, :] = interleave_and_shift(
             spline.getNodes(coord), bs, spline.getNcp()
         )
         extraction_dofmap[cell] = spline.getElement(coord)
@@ -248,7 +248,7 @@ def assembly_kernel(
 
     extraction_operators = spline.get_lagrange_extraction_operators()
     perm = get_lagrange_permutation(form, spline.getDegree(), gdim)
-    permutation = duplicate_and_increment(perm, bs)
+    permutation = interleave_and_expand(perm, bs)
 
     if profile:
         perf_log.end_timing("Computing extraction operators")
@@ -568,8 +568,22 @@ def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int):
     return permutation
 
 
-def repeat_and_increment(arr, repeats, increment):
-    shifts = np.arange(repeats) * increment
+def stack_and_shift(arr: np.ndarray, repeats: int, shift: int) -> np.ndarray:
+    """
+    Make ``repeats`` copies of the array ``arr`` and stack them
+    after adding a shift to each successive copy. Used to expand
+    the number of degrees of freedom attached to each variable in
+    a blocked manner, by appending shifted copies of the array.
+
+    Args:
+        arr (np.ndarray): array to repeat
+        repeats (int): number of repeats
+        shift (int): shift value
+
+    Returns:
+        np.ndarray: stacked and shifted array
+    """
+    shifts = np.arange(repeats) * shift
     shifts = np.repeat(shifts, len(arr))
 
     repeated_arr = np.tile(arr, repeats)
@@ -577,14 +591,41 @@ def repeat_and_increment(arr, repeats, increment):
     return repeated_arr + shifts
 
 
-def expand_and_increment(arr, n, increment):
+def interleave_and_shift(arr: np.ndarray, n: int, shift: int) -> np.ndarray:
+    """
+    Repeat each element of ``arr`` ``n`` times and each
+    successive element is shifted by ``shift``. Used to expand
+    the number of degrees of freedom attached to each variable
+    in a blocked manner while keeping the their order.
+
+    Args:
+        arr (np.ndarray): array to repeat
+        n (int): number of repeats
+        shift (int): shift value
+
+    Returns:
+        np.ndarray: interleaved and shifted array
+    """
     repeated_values = np.repeat(arr, n)
-    increments = np.tile(np.arange(n) * increment, len(arr))
+    increments = np.tile(np.arange(n) * shift, len(arr))
 
     return repeated_values + increments
 
 
-def duplicate_and_increment(arr, n):
+def interleave_and_expand(arr: np.ndarray, n: int) -> np.ndarray:
+    """
+    Repeat each element of ``arr`` ``n`` times and multiply
+    all of them by ``n``. Successive elements are then
+    incremented. Used to expand the number of degrees of
+    freedom attached to each variable in a contiguous manner.
+
+    Args:
+        arr (np.ndarray): array to repeat
+        n (int): number of repeats
+
+    Returns:
+        np.ndarray: interleaved and incremented array
+    """
     repeated_values = np.repeat(arr, n)
     increments = np.tile(np.arange(n), len(arr))
 

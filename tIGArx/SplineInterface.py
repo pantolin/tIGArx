@@ -52,6 +52,14 @@ class AbstractScalarBasis(object):
         return
 
     @abc.abstractmethod
+    def getAssociatedBasisForCp(self, cp):
+        """
+        Given a control point index ``cp``, return the basis function
+        associated with that control point.
+        """
+        return
+
+    @abc.abstractmethod
     def generateMesh(self, comm=worldcomm):
         """
         Generates and returns an FE mesh sufficient for extracting this spline

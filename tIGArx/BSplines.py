@@ -62,7 +62,7 @@ def uniform_knots(p, start, end, n_elem, periodic=False, continuity_drop=0):
     return retval
 
 
-@nb.njit
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def compute_local_bezier_extraction_operators(k_vec, p):
     """
     Compute the local extraction operators for a B-spline basis with knot
@@ -220,8 +220,8 @@ PYBIND11_MODULE(SIGNATURE, m)
 # basisFuncsCXXModule = dolfinx.jit.pybind11jit.compile_cpp_code(
 #     basisFuncsCXXString)
 
-
-@nb.njit    # function to eval B-spline basis functions (for internal use)
+# function to eval B-spline basis functions (for internal use)
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def basisFuncsInner(ghostKnots, nGhost, u, pl, i, ndu, left, right, ders):
 
     # TODO: Fix C++ module for 2018.1, and restore this (or equivalent)
@@ -473,7 +473,7 @@ class BSpline1(object):
             if i < self.nel - 1:
                 operators[i + 1, 0:p, 0] = operators[i, 1:(p + 1), p]
 
-        return operators
+        return np.ascontiguousarray(operators)
 
 
 # utility functions for indexing (mainly for internal library use)
@@ -635,14 +635,12 @@ class BSpline(AbstractScalarBasis):
             return retval
 
     def getNodes(self, xi):
-        ret_nodes = []
+        ret_nodes: np.ndarray
 
         if self.nvar == 1:
             u = xi[0]
             nodes = self.splines[0].getNodes(u)
-
-            for i in range(0, len(nodes)):
-                ret_nodes.append(nodes[i])
+            ret_nodes = np.array(nodes, dtype=np.int32)
 
         elif self.nvar == 2:
             u = xi[0]
@@ -655,10 +653,10 @@ class BSpline(AbstractScalarBasis):
             nodesv = np.array(vspline.getNodes(v))
             ret_nodes = np.zeros(len(nodesu) * len(nodesv), dtype=np.int32)
 
-            for i in range(0, len(nodesu)):
-                for j in range(0, len(nodesv)):
-                    ret_nodes[i * len(nodesv) + j] = (
-                        ij2dof(nodesu[i], nodesv[j], uspline.getNcp())
+            for j in range(0, len(nodesv)):
+                for i in range(0, len(nodesv)):
+                    ret_nodes[j * len(nodesu) + i] = (
+                        nodesv[j] * uspline.getNcp() + nodesu[i]
                     )
 
         else:
@@ -679,17 +677,13 @@ class BSpline(AbstractScalarBasis):
             n_v = len(nodesv)
             n_w = len(nodesw)
 
-            for i in range(0, n_u):
+            for k in range(0, n_w):
                 for j in range(0, n_v):
-                    for k in range(0, n_w):
-                        ret_nodes[i * n_v * n_w + j * n_w + k] = (
-                            ijk2dof(
-                                nodesu[i],
-                                nodesv[j],
-                                nodesw[k],
-                                uspline.getNcp(),
-                                vspline.getNcp(),
-                            )
+                    for i in range(0, n_u):
+                        ret_nodes[k * n_v * n_u + j * n_u + i] = (
+                            nodesw[k] * (uspline.getNcp() * vspline.getNcp())
+                            + nodesv[j] * uspline.getNcp()
+                            + nodesu[i]
                         )
 
         return ret_nodes
@@ -777,7 +771,8 @@ class BSpline(AbstractScalarBasis):
             vspline = self.splines[1]
             spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
             spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
-            return ij2dof(spanu, spanv, uspline.nel)
+            # The first value is y direction, second x
+            return spanv * uspline.nel + spanu
         else:
             u = xi[0]
             v = xi[1]
@@ -788,8 +783,12 @@ class BSpline(AbstractScalarBasis):
             spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
             spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
             spanw = wspline.getKnotSpan(w) - wspline.multiplicities[0] + 1
-            return ijk2dof(spanu, spanv, spanw, uspline.nel, vspline.nel)
+            # The first value is z direction, second y, third x
+            return spanw * (uspline.nel * vspline.nel) + spanv * uspline.nel + spanu
 
+    def getAssociatedBasisForCp(self, cp):
+        if self.nvar == 1:
+            return self.splines[0].basisFuncs(cp, self.splines[0].greville(cp))
 
     def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
         """

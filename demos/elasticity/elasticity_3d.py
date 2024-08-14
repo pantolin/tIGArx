@@ -1,6 +1,6 @@
 """
-The "hello, world" of computational PDEs:  Solve the Elaticity equation, 
-verifying accuracy via the method of manufactured solutions.  
+The "hello, world" of computational PDEs:  Solve the Elaticity equation,
+verifying accuracy via the method of manufactured solutions.
 
 This example uses the simplest IGA discretization, namely, explicit B-splines
 in which parametric and physical space are the same.
@@ -42,10 +42,12 @@ def run_elasticity():
         # each parametric direction.  By changing these and recording the error,
         # it is easy to see that the discrete solutions converge at optimal rates
         # under refinement.
-        p = 3
-        q = 3
-        NELu = 8 * (2**level)
-        NELv = 8 * (2**level)
+        p = 1
+        q = 1
+        r = 1
+        NELu = 4 * (2**level)
+        NELv = 4 * (2**level)
+        NELw = 4 * (2**level)
 
         # Material parameters
         E = 1000.0
@@ -56,16 +58,23 @@ def run_elasticity():
         # Parameters determining the position and size of the domain.
         x0 = 0.0
         y0 = 0.0
+        z0 = 0.0
+
         Lx = 1.0
         Ly = 1.0
+        Lz = 1.0
 
         perf_log.start_timing("Dimension: " + str(NELu) + " x " + str(NELv), True)
         perf_log.start_timing("Generating control mesh")
 
         # Create a control mesh for which $\Omega = \widehat{\Omega}$.
         splineMesh = ExplicitBSplineControlMesh(
-            [p, q],
-            [uniform_knots(p, x0, x0 + Lx, NELu), uniform_knots(q, y0, y0 + Ly, NELv)],
+            [p, q, r],
+            [
+                uniform_knots(p, x0, x0 + Lx, NELu),
+                uniform_knots(q, y0, y0 + Ly, NELv),
+                uniform_knots(r, z0, z0 + Lz, NELw)
+            ],
         )
 
         perf_log.end_timing("Generating control mesh")
@@ -81,9 +90,9 @@ def run_elasticity():
 
         # Set Dirichlet boundary conditions for both fields, on both
         # ends of the domain, in both directions.
-        for field in range(2):
+        for field in range(3):
             scalarSpline = splineGenerator.getScalarSpline(field)
-            for parametricDirection in [0, 1]:
+            for parametricDirection in [0, 1, 2]:
                 for side in [0, 1]:
                     sideDofs = scalarSpline.getSideDofs(parametricDirection, side)
                     splineGenerator.addZeroDofs(field, sideDofs)
@@ -113,7 +122,7 @@ def run_elasticity():
         # Choose the quadrature degree to be used throughout the analysis.
         # In IGA, especially with rational spline spaces, under-integration is a
         # fact of life, but this does not impair optimal convergence.
-        QUAD_DEG = 2 * max(p, q)
+        QUAD_DEG = 3 * max(p, q, r)
 
         # Create the extracted spline directly from the generator.
         # As of version 2019.1, this is required for using quad/hex elements in
@@ -149,11 +158,19 @@ def run_elasticity():
 
         # Create a force, f, to manufacture the solution, soln
         x = spline.spatialCoordinates()
-        soln0 = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * ufl.sin(ufl.pi * (x[1] - y0) / Ly)
-        soln1 = ufl.sin(2.0 * ufl.pi * (x[0] - x0) / Lx) * ufl.sin(
-            2.0 * ufl.pi * (x[1] - y0) / Ly
-        )
-        soln = ufl.as_vector([soln0, soln1])
+        soln0 = (ufl.sin(ufl.pi * (x[0] - x0) / Lx)
+                 * ufl.sin(ufl.pi * (x[1] - y0) / Ly)
+                 * ufl.sin(ufl.pi * (x[2] - z0) / Lz))
+
+        soln1 = (ufl.sin(2.0 * ufl.pi * (x[0] - x0) / Lx)
+                 * ufl.sin(2.0 * ufl.pi * (x[1] - y0) / Ly)
+                 * ufl.sin(2.0 * ufl.pi * (x[2] - z0) / Lz))
+
+        soln2 = (ufl.sin(3.0 * ufl.pi * (x[0] - x0) / Lx)
+                 * ufl.sin(3.0 * ufl.pi * (x[1] - y0) / Ly)
+                 * ufl.sin(3.0 * ufl.pi * (x[2] - z0) / Lz))
+
+        soln = ufl.as_vector([soln0, soln1, soln2])
         f = -spline.div(sigma(soln))
 
         # Set up and solve the Elasticity problem
@@ -168,13 +185,13 @@ def run_elasticity():
         # spline.solveLinearVariationalProblem(a == L, u)
 
         side_dofs = []
-        for parametricDirection in [0, 1]:
+        for parametricDirection in [0, 1, 2]:
             for side in [0, 1]:
                 side_dofs.append(scalarSpline.getSideDofs(parametricDirection, side))
 
         # Filter for unique dofs
         side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
-        side_dofs = repeat_and_increment(side_dofs, 2, scalarSpline.getNcp())
+        side_dofs = repeat_and_increment(side_dofs, 3, scalarSpline.getNcp())
         side_dofs = np.array(side_dofs, dtype=np.int32)
         dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
 
@@ -189,7 +206,7 @@ def run_elasticity():
         size = u.x.array.size
         u.x.array[:size] = sol.array_r
 
-        # spline.solveLinearVariationalProblem(a == L, u)
+        spline.solveLinearVariationalProblem(a == L, u)
 
         perf_log.end_timing("Solve problem")
         perf_log.end_timing("Solving")

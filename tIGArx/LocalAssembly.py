@@ -44,7 +44,6 @@ options = {
     "cffi_extra_compile_args": [
         "-O3", "-march=native", "-mtune=native", "-ffast-math"
     ],
-    "cffi_verbose": True
 }
 
 
@@ -83,6 +82,11 @@ def solve_linear_variational_problem(
 
     mat = assemble_matrix(lhs_form, spline, profile)
     vec = assemble_vector(rhs_form, spline, profile)
+
+    # for i in range(mat.block_size):
+    #     for j in range(mat.block_size):
+    #         print(mat[i, j], end=" ")
+    #     print()
 
     if profile:
         perf_log.end_timing("Assembling problem")
@@ -184,7 +188,10 @@ def assembly_kernel(
     for cell in cells:
         # Pick the center of interval/quad/hex for the evaluation point
         coord = coords[vertices[cell, :]].sum(axis=0) / 2 ** gdim
-        spline_dofmap[cell, :] = spline.getNodes(coord)
+
+        spline_dofmap[cell, :] = expand_and_increment(
+            spline.getNodes(coord), bs, spline.getNcp()
+        )
         extraction_dofmap[cell] = spline.getElement(coord)
 
     if profile:
@@ -193,14 +200,16 @@ def assembly_kernel(
     # The object that is passed to the assembly routines
     tensor: PETSc.Mat | PETSc.Vec
 
+    dimension = spline.getNcp() * bs
+
     if form.rank == 2:
         if profile:
             perf_log.start_timing("Computing pre-allocation")
 
-        max_per_row = (2 * spline.getDegree() + 1) ** gdim
+        max_per_row = bs * (2 * spline.getDegree() + 1) ** gdim
 
         ind_ptr, indices = get_csr_pre_allocation(
-            cells, spline_dofmap, spline.getNcp(), max_per_row
+            cells, spline_dofmap, dimension, max_per_row
         )
 
         if profile:
@@ -208,7 +217,7 @@ def assembly_kernel(
             perf_log.start_timing("Allocating rank-2 tensor")
 
         tensor = PETSc.Mat(form.mesh.comm)
-        tensor.createAIJ(spline.getNcp(), spline.getNcp(), nnz=ind_ptr[-1])
+        tensor.createAIJ(dimension, dimension, nnz=ind_ptr[-1])
         tensor.setPreallocationCSR((ind_ptr, indices))
 
         if profile:
@@ -219,7 +228,7 @@ def assembly_kernel(
             perf_log.start_timing("Allocating rank-1 tensor")
 
         tensor = PETSc.Vec(form.mesh.comm)
-        tensor = tensor.createWithArray(np.zeros(spline.getNcp()))
+        tensor = tensor.createWithArray(np.zeros(dimension))
 
         if profile:
             perf_log.end_timing("Allocating rank-1 tensor")
@@ -238,7 +247,8 @@ def assembly_kernel(
         perf_log.start_timing("Computing extraction operators")
 
     extraction_operators = spline.get_lagrange_extraction_operators()
-    permutation = get_lagrange_permutation(form, spline.getDegree(), gdim, bs)
+    perm = get_lagrange_permutation(form, spline.getDegree(), gdim)
+    permutation = duplicate_and_increment(perm, bs)
 
     if profile:
         perf_log.end_timing("Computing extraction operators")
@@ -308,7 +318,7 @@ def assembly_kernel(
     return tensor
 
 
-@nb.njit
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _assemble_matrix(
         mat_handle,
         kernel,
@@ -335,37 +345,46 @@ def _assemble_matrix(
     # Don't permute
     perm = np.array([0], dtype=np.uint8)
 
+    # Allocating memory for the local matrix and the full Kronecker product
     mat_local = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
-    bs_mat = np.ones(bs, dtype=PETSc.ScalarType)
+    full_kron = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
+
+    # Matrix for the number of variables attached to each dof
+    bs_mat = np.eye(bs, dtype=PETSc.ScalarType)
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        extraction_kron: np.ndarray
 
-        if gdim == 1:
-            i = element
-            extraction_kron = np.ascontiguousarray(operators[0][i, :, :])
+        if gdim == 1 or len(operators) == 1:
+            full_kron[:, :] = np.kron(operators[0][element], bs_mat)
+
         elif gdim == 2:
-            i = element % operators[0].shape[0]
             j = element // operators[0].shape[0]
+            i = element % operators[0].shape[0]
 
-            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
-            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
-
-            extraction_kron = np.kron(extraction_i, extraction_j)
+            full_kron[:, :] = np.kron(
+                np.kron(
+                    operators[1][j],
+                    operators[0][i]
+                ),
+                bs_mat
+            )
         else:
-            ij = element % (operators[0].shape[0] * operators[1].shape[0])
             k = element // (operators[0].shape[0] * operators[1].shape[0])
-            i = ij % operators[0].shape[0]
+            ij = element % (operators[0].shape[0] * operators[1].shape[0])
             j = ij // operators[0].shape[0]
+            i = ij % operators[0].shape[0]
 
-            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
-            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
-            extraction_k = np.ascontiguousarray(operators[2][k, :, :])
-
-            extraction_kron = np.kron(np.kron(extraction_i, extraction_j), extraction_k)
-
-        full_kron = np.kron(extraction_kron, bs_mat)
+            full_kron[:, :] = np.kron(
+                np.kron(
+                    np.kron(
+                        operators[2][k],
+                        operators[1][j]
+                    ),
+                    operators[0][i]
+                ),
+                bs_mat,
+            )
 
         pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
@@ -382,9 +401,10 @@ def _assemble_matrix(
 
         # Permute the rows and columns so that they match the
         # indexing of the spline basis
-        mat_local = mat_local[permutation, :][:, permutation]
-        mat_local = full_kron @ mat_local @ full_kron.T
+        mat_local[:, :] = mat_local[permutation, :][:, permutation]
+        mat_local[:, :] = full_kron @ mat_local @ full_kron.T
 
+        # mat_handle.setValues(pos, pos, mat_local, PETSc.InsertMode.ADD_VALUES)
         set_vals(
             mat_handle,
             num_loc_dofs,
@@ -396,7 +416,7 @@ def _assemble_matrix(
         )
 
 
-@nb.njit
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _assemble_vector(
         vec,
         kernel,
@@ -418,42 +438,51 @@ def _assemble_vector(
     # Initialize
     num_loc_vertices = vertices.shape[1]
     cell_coords = np.zeros((num_loc_vertices, 3))
-    vec_local = np.zeros(num_loc_dofs, dtype=PETSc.ScalarType)
     entity_local_index = np.array([0], dtype=np.intc)
 
     # Don't permute
     perm = np.array([0], dtype=np.uint8)
+
+    # Allocating memory for the local vector and the full Kronecker product
+    vec_local = np.zeros(num_loc_dofs, dtype=PETSc.ScalarType)
+    full_kron = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
+
     # Matrix for the number of variables attached to each dof
-    bs_mat = np.ones(bs, dtype=PETSc.ScalarType)
+    bs_mat = np.eye(bs, dtype=PETSc.ScalarType)
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        extraction_kron: np.ndarray
 
-        if gdim == 1:
-            i = element
-            extraction_kron = np.ascontiguousarray(operators[0][i, :, :])
+        if gdim == 1 or len(operators) == 1:
+            full_kron[:, :] = np.kron(operators[0][element], bs_mat)
+
         elif gdim == 2:
-            i = element % operators[0].shape[0]
             j = element // operators[0].shape[0]
+            i = element % operators[0].shape[0]
 
-            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
-            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
-
-            extraction_kron = np.kron(extraction_i, extraction_j)
+            full_kron[:, :] = np.kron(
+                np.kron(
+                    operators[1][j],
+                    operators[0][i]
+                ),
+                bs_mat
+            )
         else:
-            ij = element % (operators[0].shape[0] * operators[1].shape[0])
             k = element // (operators[0].shape[0] * operators[1].shape[0])
-            i = ij % operators[0].shape[0]
+            ij = element % (operators[0].shape[0] * operators[1].shape[0])
             j = ij // operators[0].shape[0]
+            i = ij % operators[0].shape[0]
 
-            extraction_i = np.ascontiguousarray(operators[0][i, :, :])
-            extraction_j = np.ascontiguousarray(operators[1][j, :, :])
-            extraction_k = np.ascontiguousarray(operators[2][k, :, :])
-
-            extraction_kron = np.kron(np.kron(extraction_i, extraction_j), extraction_k)
-
-        full_kron = np.kron(extraction_kron, bs_mat)
+            full_kron[:, :] = np.kron(
+                np.kron(
+                    np.kron(
+                        operators[2][k],
+                        operators[1][j]
+                    ),
+                    operators[0][i]
+                ),
+                bs_mat,
+            )
 
         pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
@@ -468,8 +497,8 @@ def _assemble_vector(
             ffi.from_buffer(perm),
         )
 
-        vec_local = vec_local[permutation]
-        vec_local = full_kron @ vec_local
+        vec_local[:] = vec_local[permutation]
+        vec_local[:] = full_kron @ vec_local
 
         # vec.setValues(pos, vec_local, PETSc.InsertMode.ADD_VALUES)
         set_vals(
@@ -500,7 +529,7 @@ def get_vertices(mesh: dolfinx.mesh.Mesh):
     return vertices, coords, gdim
 
 
-def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int, bs: int = 1):
+def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int):
     """
     Get permutation for Lagrange basis
 
@@ -508,7 +537,6 @@ def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int, bs: in
         form (dolfinx.fem.Form): form object
         deg (int): degree of the basis
         gdim (int): mesh dimension`
-        bs (int, optional): number of variables attached to each dof. Default is 1.
     Returns:
         permutation (np.array): permutation array
     """
@@ -525,22 +553,45 @@ def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int, bs: in
             index_i = int(coord[0] * deg)
             index_j = int(coord[1] * deg)
             # TODO - investigate why j goes before i here
-            permutation[index_j * (deg + 1) + index_i] = ind
+            permutation[index_i * (deg + 1) + index_j] = ind
 
     elif gdim == 3:
         for ind, coord in enumerate(dof_coords):
             index_i = int(coord[0] * deg)
             index_j = int(coord[1] * deg)
             index_k = int(coord[2] * deg)
-            permutation[index_i * (deg + 1) ** 2 + index_j * (deg + 1) + index_k] = ind
+            permutation[index_k * (deg + 1) ** 2 + index_j * (deg + 1) + index_i] = ind
 
     else:
         raise ValueError("Invalid mesh dimension")
 
-    return permutation.repeat(bs)
+    return permutation
 
 
-@nb.njit
+def repeat_and_increment(arr, repeats, increment):
+    shifts = np.arange(repeats) * increment
+    shifts = np.repeat(shifts, len(arr))
+
+    repeated_arr = np.tile(arr, repeats)
+
+    return repeated_arr + shifts
+
+
+def expand_and_increment(arr, n, increment):
+    repeated_values = np.repeat(arr, n)
+    increments = np.tile(np.arange(n) * increment, len(arr))
+
+    return repeated_values + increments
+
+
+def duplicate_and_increment(arr, n):
+    repeated_values = np.repeat(arr, n)
+    increments = np.tile(np.arange(n), len(arr))
+
+    return repeated_values * n + increments
+
+
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def get_nnz_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
     temp_dofs = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
     nnz_per_row = np.zeros(rows, dtype=np.int32)
@@ -562,7 +613,7 @@ def get_nnz_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
     return nnz_per_row
 
 
-@nb.njit
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def get_csr_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
     dofs_per_row = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
     nnz_per_row = np.zeros(rows, dtype=np.int32)

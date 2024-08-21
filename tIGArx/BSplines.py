@@ -475,6 +475,55 @@ class BSpline1(object):
 
         return np.ascontiguousarray(operators)
 
+    def compute_start_indices(self):
+        """
+        Compute the start indices of the control points in the global
+        control point vector.
+        """
+        start_indices = np.zeros(self.nel, dtype=np.int32)
+
+        start_indices[0] = 0
+        for i in range(1, self.nel):
+            start_indices[i] = start_indices[i - 1] + self.multiplicities[i]
+
+        return start_indices
+
+    def compute_dofs(self):
+        """
+        Compute the global degrees of freedom of the B-spline basis.
+        """
+        start_indices = self.compute_start_indices()
+
+        dofs_per_span = (start_indices[:, np.newaxis]
+                         + np.arange(self.p + 1)[np.newaxis, :])
+
+        return dofs_per_span
+
+    def interacting_basis_functions(self):
+        """
+        Returns a list of lists, where the i-th list contains the
+        global degrees of freedom of basis functions that interact
+        with the i-th basis function
+        """
+        dofs = self.compute_dofs()
+        func_support = [[] for _ in range(self.ncp)]
+
+        for interval, funcs_on_interval in enumerate(dofs):
+            for func in funcs_on_interval:
+                func_support[func].append(interval)
+
+        interaction_list = []
+
+        for i in range(self.ncp):
+            local_list = []
+
+            for interval in func_support[i]:
+                local_list += list(dofs[interval, :])
+
+            interaction_list.append(np.sort(np.unique(local_list)))
+
+        return interaction_list
+
 
 # utility functions for indexing (mainly for internal library use)
 def ij2dof(i, j, M):
@@ -523,7 +572,7 @@ class BSpline(AbstractScalarBasis):
         if self.nvar > 3 or self.nvar < 1:
             print("ERROR: Unsupported parametric dimension.")
             exit()
-        self.splines = []
+        self.splines: list[BSpline1] = []
         for i in range(0, self.nvar):
             self.splines += [
                 BSpline1(degrees[i], kvecs[i]),
@@ -654,7 +703,7 @@ class BSpline(AbstractScalarBasis):
             ret_nodes = np.zeros(len(nodesu) * len(nodesv), dtype=np.int32)
 
             for j in range(0, len(nodesv)):
-                for i in range(0, len(nodesv)):
+                for i in range(0, len(nodesu)):
                     ret_nodes[j * len(nodesu) + i] = (
                         nodesv[j] * uspline.getNcp() + nodesu[i]
                     )
@@ -761,34 +810,150 @@ class BSpline(AbstractScalarBasis):
         """
         if self.nvar == 1:
             u = xi[0]
-            uspline = self.splines[0]
-            span = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
+            u_spline = self.splines[0]
+            span = u_spline.getKnotSpan(u) - u_spline.multiplicities[0] + 1
             return span
         elif self.nvar == 2:
             u = xi[0]
             v = xi[1]
-            uspline = self.splines[0]
-            vspline = self.splines[1]
-            spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
-            spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
+
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+
+            u_span = u_spline.getKnotSpan(u) - u_spline.multiplicities[0] + 1
+            v_span = v_spline.getKnotSpan(v) - v_spline.multiplicities[0] + 1
             # The first value is y direction, second x
-            return spanv * uspline.nel + spanu
+            return v_span * u_spline.nel + u_span
         else:
             u = xi[0]
             v = xi[1]
             w = xi[2]
-            uspline = self.splines[0]
-            vspline = self.splines[1]
-            wspline = self.splines[2]
-            spanu = uspline.getKnotSpan(u) - uspline.multiplicities[0] + 1
-            spanv = vspline.getKnotSpan(v) - vspline.multiplicities[0] + 1
-            spanw = wspline.getKnotSpan(w) - wspline.multiplicities[0] + 1
-            # The first value is z direction, second y, third x
-            return spanw * (uspline.nel * vspline.nel) + spanv * uspline.nel + spanu
 
-    def getAssociatedBasisForCp(self, cp):
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+            w_spline = self.splines[2]
+
+            u_span = u_spline.getKnotSpan(u) - u_spline.multiplicities[0] + 1
+            v_span = v_spline.getKnotSpan(v) - v_spline.multiplicities[0] + 1
+            w_span = w_spline.getKnotSpan(w) - w_spline.multiplicities[0] + 1
+            # The first value is z direction, second y, third x
+            return (w_span * (u_spline.nel * v_spline.nel)
+                    + v_span * u_spline.nel
+                    + u_span)
+
+    def getCpDofmap(self, cells: np.ndarray):
         if self.nvar == 1:
-            return self.splines[0].basisFuncs(cp, self.splines[0].greville(cp))
+            dofs = self.splines[0].compute_dofs()
+            return dofs[cells]
+
+        elif self.nvar == 2:
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+
+            u_indices = u_spline.compute_dofs()
+            v_indices = v_spline.compute_dofs()
+
+            u_nel = u_spline.nel
+
+            dofs = np.zeros((cells.shape[0], (u_spline.p + 1) * (v_spline.p + 1)),
+                            dtype=np.int32)
+
+            for i, cell in enumerate(cells.data):
+                v_span = cell // u_nel
+                u_span = cell % u_nel
+
+                dofs[i, :] = np.add.outer(
+                    v_indices[v_span] * u_spline.getNcp(),
+                    u_indices[u_span]
+                ).reshape((1, -1))
+
+            return dofs
+
+        else:
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+            w_spline = self.splines[2]
+
+            u_indices = u_spline.compute_dofs()
+            v_indices = v_spline.compute_dofs()
+            w_indices = w_spline.compute_dofs()
+
+            u_nel = u_spline.nel
+            v_nel = v_spline.nel
+
+            dofs = np.zeros(
+                (
+                    cells.shape[0],
+                    (u_spline.p + 1) * (v_spline.p + 1) * (w_spline.p + 1)
+                ),
+                dtype=np.int32
+            )
+
+            for i, cell in enumerate(cells.data):
+                w_span = cell // (u_nel * v_nel)
+                v_span = (cell // u_nel) % v_nel
+                u_span = cell % u_nel
+
+                dofs[i, :] = np.add.outer(
+                    w_indices[w_span] * (u_spline.getNcp() * v_spline.getNcp()),
+                    np.add.outer(
+                        v_indices[v_span] * u_spline.getNcp(),
+                        u_indices[u_span]
+                    ).reshape((1, -1))
+                ).reshape((1, -1))
+
+            return dofs
+
+    def getCSRPrealloc(self, block_size=1):
+        interacting: list[np.ndarray] = []
+
+        if self.nvar == 1:
+            interacting = self.splines[0].interacting_basis_functions()
+
+        elif self.nvar == 2:
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+
+            u_inter = u_spline.interacting_basis_functions()
+            v_inter = v_spline.interacting_basis_functions()
+
+            for j in range(v_spline.getNcp()):
+                for i in range(u_spline.getNcp()):
+                    interacting.append(
+                        np.add.outer(
+                            v_inter[j] * u_spline.getNcp(),
+                            u_inter[i]
+                        ).reshape(-1)
+                    )
+        else:
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+            w_spline = self.splines[2]
+
+            u_inter = u_spline.interacting_basis_functions()
+            v_inter = v_spline.interacting_basis_functions()
+            w_inter = w_spline.interacting_basis_functions()
+
+            for k in range(w_spline.getNcp()):
+                for j in range(v_spline.getNcp()):
+                    for i in range(u_spline.getNcp()):
+                        interacting.append(
+                            np.add.outer(
+                                w_inter[k] * (u_spline.getNcp() * v_spline.getNcp()),
+                                np.add.outer(
+                                    v_inter[j] * u_spline.getNcp(),
+                                    u_inter[i]
+                                ).reshape(-1)
+                            ).reshape(-1)
+                        )
+
+        index_ptr = np.zeros(self.ncp + 1, dtype=np.int32)
+        index_ptr[0] = 0
+
+        for i in range(self.ncp):
+            index_ptr[i + 1] = index_ptr[i] + len(interacting[i])
+
+        return index_ptr, np.concatenate(interacting)
 
     def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
         """

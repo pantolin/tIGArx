@@ -23,6 +23,9 @@ class AbstractScalarBasis(object):
         ``[[index0, N_index0(xi)], [index1,N_index1(xi)], ... ]``
 
         where ``N_i`` is the ``i``-th basis function.
+
+        Args:
+            xi: A numpy array of parametric points.
         """
         return
 
@@ -33,6 +36,9 @@ class AbstractScalarBasis(object):
         ``[index0, index1, ... ]``
 
         where ``index_i`` is the index of the ``i``-th basis function.
+
+        Args:
+            xi: A numpy array of parametric points.
         """
         return [node[0] for node in self.getNodesAndEvals(xi)]
 
@@ -52,10 +58,12 @@ class AbstractScalarBasis(object):
         return
 
     @abc.abstractmethod
-    def getAssociatedBasisForCp(self, cp):
+    def getCpDofmap(self, cells: np.ndarray):
         """
-        Given a control point index ``cp``, return the basis function
-        associated with that control point.
+        Returns a list of the form ``[dof0, dof1, ...]``, where
+        ``dof_i`` is the global degree of freedom index of the
+        ``i``-th basis function, and thus the associated control
+        point.
         """
         return
 
@@ -139,6 +147,16 @@ class AbstractScalarBasis(object):
         overkill.
         """
         return DEFAULT_PREALLOC
+
+    def getCSRPrealloc(self, block_size=1):
+        """
+        Returns a pair of numpy arrays, the first of which is the index
+        pointer array for a CSR matrix, and the second of which is the
+        column index array for a CSR matrix. The pre-allocation needs to
+        be exact for the CSR matrix to be efficient. The argument
+        ``block_size`` is the number of basis functions that are associated
+        with each control point.
+        """
 
 
 # interface needed for a control mesh with a coordinate chart

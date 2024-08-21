@@ -42,8 +42,8 @@ def run_elasticity():
         # each parametric direction.  By changing these and recording the error,
         # it is easy to see that the discrete solutions converge at optimal rates
         # under refinement.
-        p = 3
-        q = 3
+        p = 4
+        q = 4
         NELu = 8 * (2**level)
         NELv = 8 * (2**level)
 
@@ -189,7 +189,7 @@ def run_elasticity():
         size = u.x.array.size
         u.x.array[:size] = sol.array_r
 
-        # spline.solveLinearVariationalProblem(a == L, u)
+        spline.solveLinearVariationalProblem(a == L, u)
 
         perf_log.end_timing("Solve problem")
         perf_log.end_timing("Solving")

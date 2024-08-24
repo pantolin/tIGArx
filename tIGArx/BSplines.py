@@ -16,6 +16,7 @@ from dolfinx import default_real_type
 
 from tIGArx.common import INDEX_TYPE, worldcomm
 from tIGArx.SplineInterface import AbstractScalarBasis, AbstractControlMesh
+from tIGArx.utils import interleave_and_shift, interleave_and_expand, stack_and_shift
 
 
 def uniform_knots(p, start, end, n_elem, periodic=False, continuity_drop=0):
@@ -520,7 +521,12 @@ class BSpline1(object):
             for interval in func_support[i]:
                 local_list += list(dofs[interval, :])
 
-            interaction_list.append(np.sort(np.unique(local_list)))
+            interaction_list.append(
+                np.array(
+                    np.sort(np.unique(local_list)),
+                    dtype=np.int32
+                )
+            )
 
         return interaction_list
 
@@ -741,7 +747,7 @@ class BSpline(AbstractScalarBasis):
         if self.nvar == 1:
             spline = self.splines[0]
             mesh = dolfinx.mesh.create_unit_interval(comm, spline.nel)
-            x = mesh.geometry.x
+
             x = mesh.geometry.x
             for i in range(0, len(x)):
                 knotIndex = int(round(x[i, 0] * float(spline.nel)))
@@ -755,12 +761,14 @@ class BSpline(AbstractScalarBasis):
             mesh = dolfinx.mesh.create_unit_square(
                 comm, uspline.nel, vspline.nel, cellType
             )
+
             x = mesh.geometry.x
             for i in range(0, len(x)):
                 # uknotIndex = int(round(x[i,0]))
                 # vknotIndex = int(round(x[i,1]))
                 uknotIndex = int(round(x[i, 0] * float(uspline.nel)))
                 vknotIndex = int(round(x[i, 1] * float(vspline.nel)))
+
                 x[i, 0] = uspline.uniqueKnots[uknotIndex]
                 x[i, 1] = vspline.uniqueKnots[vknotIndex]
             # return mesh
@@ -772,6 +780,7 @@ class BSpline(AbstractScalarBasis):
             mesh = dolfinx.mesh.create_unit_cube(
                 comm, uspline.nel, vspline.nel, wspline.nel, cellType
             )
+
             x = mesh.geometry.x
             for i in range(0, len(x)):
                 # uknotIndex = int(round(x[i,0]))
@@ -780,6 +789,7 @@ class BSpline(AbstractScalarBasis):
                 uknotIndex = int(round(x[i, 0] * float(uspline.nel)))
                 vknotIndex = int(round(x[i, 1] * float(vspline.nel)))
                 wknotIndex = int(round(x[i, 2] * float(wspline.nel)))
+
                 x[i, 0] = uspline.uniqueKnots[uknotIndex]
                 x[i, 1] = vspline.uniqueKnots[vknotIndex]
                 x[i, 2] = wspline.uniqueKnots[wknotIndex]
@@ -841,10 +851,20 @@ class BSpline(AbstractScalarBasis):
                     + v_span * u_spline.nel
                     + u_span)
 
-    def getCpDofmap(self, cells: np.ndarray):
+    def getCpDofmap(self, cells: np.ndarray, block_size=1):
+        dofs: np.ndarray
+
         if self.nvar == 1:
-            dofs = self.splines[0].compute_dofs()
-            return dofs[cells]
+            u_indices = self.splines[0].compute_dofs()
+
+            dofs = np.empty(
+                (cells.shape[0], (self.splines[0].p + 1) * block_size),
+                dtype=np.int32
+            )
+
+            for i, cell in enumerate(cells.data):
+                temp_dofs = u_indices[cell]
+                dofs[i, :] = interleave_and_shift(temp_dofs, block_size, self.getNcp())
 
         elif self.nvar == 2:
             u_spline = self.splines[0]
@@ -855,19 +875,24 @@ class BSpline(AbstractScalarBasis):
 
             u_nel = u_spline.nel
 
-            dofs = np.zeros((cells.shape[0], (u_spline.p + 1) * (v_spline.p + 1)),
-                            dtype=np.int32)
+            dofs = np.empty(
+                (
+                    cells.shape[0],
+                    (u_spline.p + 1) * (v_spline.p + 1) * block_size
+                ),
+                dtype=np.int32
+            )
 
             for i, cell in enumerate(cells.data):
                 v_span = cell // u_nel
                 u_span = cell % u_nel
 
-                dofs[i, :] = np.add.outer(
+                temp_dofs = np.add.outer(
                     v_indices[v_span] * u_spline.getNcp(),
                     u_indices[u_span]
-                ).reshape((1, -1))
+                ).reshape(-1)
 
-            return dofs
+                dofs[i, :] = interleave_and_shift(temp_dofs, block_size, self.getNcp())
 
         else:
             u_spline = self.splines[0]
@@ -881,10 +906,10 @@ class BSpline(AbstractScalarBasis):
             u_nel = u_spline.nel
             v_nel = v_spline.nel
 
-            dofs = np.zeros(
+            dofs = np.empty(
                 (
                     cells.shape[0],
-                    (u_spline.p + 1) * (v_spline.p + 1) * (w_spline.p + 1)
+                    (u_spline.p + 1) * (v_spline.p + 1) * (w_spline.p + 1) * block_size
                 ),
                 dtype=np.int32
             )
@@ -894,21 +919,60 @@ class BSpline(AbstractScalarBasis):
                 v_span = (cell // u_nel) % v_nel
                 u_span = cell % u_nel
 
-                dofs[i, :] = np.add.outer(
+                temp_dofs = np.add.outer(
                     w_indices[w_span] * (u_spline.getNcp() * v_spline.getNcp()),
                     np.add.outer(
                         v_indices[v_span] * u_spline.getNcp(),
                         u_indices[u_span]
-                    ).reshape((1, -1))
-                ).reshape((1, -1))
+                    ).reshape(-1)
+                ).reshape(-1)
 
-            return dofs
+                dofs[i, :] = interleave_and_shift(temp_dofs, block_size, self.getNcp())
+
+        return dofs
+
+    def getExtractionOrdering(self, mesh: dolfinx.mesh.Mesh):
+        """
+        Returns the ordering of the control points in the global control point
+        vector.
+        """
+        if self.nvar == 1:
+            return np.arange(self.splines[0].getNcp(), dtype=np.int32)
+
+        elif self.nvar == 2:
+            # The 2D case is special, as the ordering is not the same as the
+            n_u = self.splines[0].nel
+            n_v = self.splines[1].nel
+            cell_matrix = np.arange(n_u * n_v, dtype=np.int32).reshape(n_v, n_u)
+
+            ordering = np.empty(n_u * n_v, dtype=np.int32)
+            index = 0
+
+            # Iterate over all possible sums of indices from 0 to M+N-2
+            for s in range(n_v + n_u - 1):
+                # Give the y-axis index priority
+                for i in range(min(n_v - 1, s), max(-1, s - n_u), -1):
+                    j = s - i
+                    if j < n_u:
+                        ordering[index] = cell_matrix[i, j]
+                        index += 1
+
+            return ordering
+
+        else:
+            # In 3D the actual ordering corresponds to the topological one
+            # It could be done in a similar fashion as for 2D, but the
+            # traversal is complicated, and corresponds to the established
+            # ordering in the mesh.
+            return mesh.topology.original_cell_index
 
     def getCSRPrealloc(self, block_size=1):
         interacting: list[np.ndarray] = []
 
         if self.nvar == 1:
-            interacting = self.splines[0].interacting_basis_functions()
+            temp = self.splines[0].interacting_basis_functions()
+            for i in range(self.ncp):
+                interacting.append(stack_and_shift(temp[i], block_size, self.getNcp()))
 
         elif self.nvar == 2:
             u_spline = self.splines[0]
@@ -919,12 +983,16 @@ class BSpline(AbstractScalarBasis):
 
             for j in range(v_spline.getNcp()):
                 for i in range(u_spline.getNcp()):
-                    interacting.append(
+                    temp = stack_and_shift(
                         np.add.outer(
                             v_inter[j] * u_spline.getNcp(),
                             u_inter[i]
-                        ).reshape(-1)
+                        ).reshape(-1),
+                        block_size,
+                        self.getNcp()
                     )
+                    interacting.append(np.array(temp, dtype=np.int32))
+
         else:
             u_spline = self.splines[0]
             v_spline = self.splines[1]
@@ -937,20 +1005,26 @@ class BSpline(AbstractScalarBasis):
             for k in range(w_spline.getNcp()):
                 for j in range(v_spline.getNcp()):
                     for i in range(u_spline.getNcp()):
-                        interacting.append(
+                        temp = stack_and_shift(
                             np.add.outer(
                                 w_inter[k] * (u_spline.getNcp() * v_spline.getNcp()),
                                 np.add.outer(
                                     v_inter[j] * u_spline.getNcp(),
                                     u_inter[i]
                                 ).reshape(-1)
-                            ).reshape(-1)
+                            ).reshape(-1),
+                            block_size,
+                            self.getNcp()
                         )
+                        interacting.append(np.array(temp, dtype=np.int32))
 
-        index_ptr = np.zeros(self.ncp + 1, dtype=np.int32)
+        # repeat the list interacting block_size times
+        interacting = interacting * block_size
+
+        index_ptr = np.zeros(self.ncp * block_size + 1, dtype=np.int32)
         index_ptr[0] = 0
 
-        for i in range(self.ncp):
+        for i in range(self.ncp * block_size):
             index_ptr[i + 1] = index_ptr[i] + len(interacting[i])
 
         return index_ptr, np.concatenate(interacting)

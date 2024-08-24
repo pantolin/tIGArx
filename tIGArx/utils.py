@@ -133,4 +133,104 @@ def createFunctionSpace(mesh, ufl_elem):
     return V
 
 
+def stack_and_shift(arr: np.ndarray, repeats: int, shift: int) -> np.ndarray:
+    """
+    Make ``repeats`` copies of the array ``arr`` and stack them
+    after adding a shift to each successive copy. Used to expand
+    the number of degrees of freedom attached to each variable in
+    a blocked manner, by appending shifted copies of the array.
 
+    Args:
+        arr (np.ndarray): array to repeat
+        repeats (int): number of repeats
+        shift (int): shift value
+
+    Returns:
+        np.ndarray: stacked and shifted array
+    """
+    shifts = np.arange(repeats) * shift
+    shifts = np.repeat(shifts, len(arr))
+
+    repeated_arr = np.tile(arr, repeats)
+
+    return repeated_arr + shifts
+
+
+def interleave_and_shift(arr: np.ndarray, n: int, shift: int) -> np.ndarray:
+    """
+    Repeat each element of ``arr`` ``n`` times and each
+    successive element is shifted by ``shift``. Used to expand
+    the number of degrees of freedom attached to each variable
+    in a blocked manner while keeping the their order.
+
+    Args:
+        arr (np.ndarray): array to repeat
+        n (int): number of repeats
+        shift (int): shift value
+
+    Returns:
+        np.ndarray: interleaved and shifted array
+    """
+    repeated_values = np.repeat(arr, n)
+    increments = np.tile(np.arange(n) * shift, len(arr))
+
+    return repeated_values + increments
+
+
+def interleave_and_expand(arr: np.ndarray, n: int) -> np.ndarray:
+    """
+    Repeat each element of ``arr`` ``n`` times and multiply
+    all of them by ``n``. Successive elements are then
+    incremented. Used to expand the number of degrees of
+    freedom attached to each variable in a contiguous manner.
+
+    Args:
+        arr (np.ndarray): array to repeat
+        n (int): number of repeats
+
+    Returns:
+        np.ndarray: interleaved and incremented array
+    """
+    repeated_values = np.repeat(arr, n)
+    increments = np.tile(np.arange(n), len(arr))
+
+    return repeated_values * n + increments
+
+
+def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int):
+    """
+    Get permutation for Lagrange basis
+
+    Args:
+        form (dolfinx.fem.Form): form object
+        deg (int): degree of the basis
+        gdim (int): mesh dimension`
+    Returns:
+        permutation (np.array): permutation array
+    """
+    dof_coords = form.function_spaces[0].element.basix_element.points
+    permutation = np.zeros(dof_coords.shape[0], dtype=np.uint32)
+
+    if gdim == 1:
+        for ind, coord in enumerate(dof_coords):
+            index = int(coord[0] * deg)
+            permutation[index] = ind
+
+    elif gdim == 2:
+        for ind, coord in enumerate(dof_coords):
+            index_i = int(coord[0] * deg)
+            index_j = int(coord[1] * deg)
+            # TODO - investigate why j goes before i here
+            permutation[index_i * (deg + 1) + index_j] = ind
+
+    elif gdim == 3:
+        for ind, coord in enumerate(dof_coords):
+            index_i = int(coord[0] * deg)
+            index_j = int(coord[1] * deg)
+            index_k = int(coord[2] * deg)
+            permutation[index_k * (deg + 1) ** 2 + index_j * (deg + 1) + index_i] = ind
+
+    else:
+        raise ValueError("Invalid mesh dimension")
+
+    return permutation

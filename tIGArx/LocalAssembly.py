@@ -12,6 +12,7 @@ from petsc4py import PETSc
 
 from tIGArx.SplineInterface import AbstractScalarBasis
 from tIGArx.timing_util import perf_log
+from tIGArx.utils import interleave_and_expand, get_lagrange_permutation
 
 ffi = FFI()
 
@@ -182,17 +183,8 @@ def assembly_kernel(
         perf_log.end_timing("Getting basic data")
         perf_log.start_timing("Creating dofmap")
 
-    spline_dofmap = np.zeros((len(cells), num_loc_dofs), dtype=np.int32)
-    extraction_dofmap = np.zeros(len(cells), dtype=np.int64)
-
-    for cell in cells:
-        # Pick the center of interval/quad/hex for the evaluation point
-        coord = coords[vertices[cell, :]].sum(axis=0) / 2 ** gdim
-
-        spline_dofmap[cell, :] = interleave_and_shift(
-            spline.getNodes(coord), bs, spline.getNcp()
-        )
-        extraction_dofmap[cell] = spline.getElement(coord)
+    extraction_dofmap = spline.getExtractionOrdering(form.mesh)
+    spline_dofmap = spline.getCpDofmap(extraction_dofmap, block_size=bs)
 
     if profile:
         perf_log.end_timing("Creating dofmap")
@@ -206,19 +198,14 @@ def assembly_kernel(
         if profile:
             perf_log.start_timing("Computing pre-allocation")
 
-        max_per_row = bs * (2 * spline.getDegree() + 1) ** gdim
-
-        ind_ptr, indices = get_csr_pre_allocation(
-            cells, spline_dofmap, dimension, max_per_row
-        )
+        csr_allocation = spline.getCSRPrealloc(block_size=bs)
 
         if profile:
             perf_log.end_timing("Computing pre-allocation")
             perf_log.start_timing("Allocating rank-2 tensor")
 
         tensor = PETSc.Mat(form.mesh.comm)
-        tensor.createAIJ(dimension, dimension, nnz=ind_ptr[-1])
-        tensor.setPreallocationCSR((ind_ptr, indices))
+        tensor.createAIJ(dimension, dimension, csr=csr_allocation)
 
         if profile:
             perf_log.end_timing("Allocating rank-2 tensor")
@@ -319,6 +306,38 @@ def assembly_kernel(
 
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def get_full_operator(operators, bs, gdim, element):
+    if gdim == 1 or len(operators) == 1:
+        return np.kron(operators[0][element], np.eye(bs, dtype=PETSc.ScalarType))
+
+    elif gdim == 2:
+        j = element // operators[0].shape[0]
+        i = element % operators[0].shape[0]
+
+        return np.kron(
+            np.kron(
+                operators[1][j],
+                operators[0][i]
+            ),
+            np.eye(bs, dtype=PETSc.ScalarType)
+        )
+    else:
+        k = element // (operators[0].shape[0] * operators[1].shape[0])
+        j = (element // operators[0].shape[0]) % operators[1].shape[0]
+        i = element % operators[0].shape[0]
+
+        return np.kron(
+            np.kron(
+                np.kron(
+                    operators[2][k],
+                    operators[1][j]
+                ),
+                operators[0][i]
+            ),
+            np.eye(bs, dtype=PETSc.ScalarType)
+        )
+
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _assemble_matrix(
         mat_handle,
         kernel,
@@ -349,42 +368,9 @@ def _assemble_matrix(
     mat_local = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
     full_kron = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
 
-    # Matrix for the number of variables attached to each dof
-    bs_mat = np.eye(bs, dtype=PETSc.ScalarType)
-
     for cell in cells:
         element = extraction_dofmap[cell]
-
-        if gdim == 1 or len(operators) == 1:
-            full_kron[:, :] = np.kron(operators[0][element], bs_mat)
-
-        elif gdim == 2:
-            j = element // operators[0].shape[0]
-            i = element % operators[0].shape[0]
-
-            full_kron[:, :] = np.kron(
-                np.kron(
-                    operators[1][j],
-                    operators[0][i]
-                ),
-                bs_mat
-            )
-        else:
-            k = element // (operators[0].shape[0] * operators[1].shape[0])
-            ij = element % (operators[0].shape[0] * operators[1].shape[0])
-            j = ij // operators[0].shape[0]
-            i = ij % operators[0].shape[0]
-
-            full_kron[:, :] = np.kron(
-                np.kron(
-                    np.kron(
-                        operators[2][k],
-                        operators[1][j]
-                    ),
-                    operators[0][i]
-                ),
-                bs_mat,
-            )
+        full_kron[:, :] = get_full_operator(operators, bs, gdim, element)
 
         pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
@@ -447,42 +433,9 @@ def _assemble_vector(
     vec_local = np.zeros(num_loc_dofs, dtype=PETSc.ScalarType)
     full_kron = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
 
-    # Matrix for the number of variables attached to each dof
-    bs_mat = np.eye(bs, dtype=PETSc.ScalarType)
-
     for cell in cells:
         element = extraction_dofmap[cell]
-
-        if gdim == 1 or len(operators) == 1:
-            full_kron[:, :] = np.kron(operators[0][element], bs_mat)
-
-        elif gdim == 2:
-            j = element // operators[0].shape[0]
-            i = element % operators[0].shape[0]
-
-            full_kron[:, :] = np.kron(
-                np.kron(
-                    operators[1][j],
-                    operators[0][i]
-                ),
-                bs_mat
-            )
-        else:
-            k = element // (operators[0].shape[0] * operators[1].shape[0])
-            ij = element % (operators[0].shape[0] * operators[1].shape[0])
-            j = ij // operators[0].shape[0]
-            i = ij % operators[0].shape[0]
-
-            full_kron[:, :] = np.kron(
-                np.kron(
-                    np.kron(
-                        operators[2][k],
-                        operators[1][j]
-                    ),
-                    operators[0][i]
-                ),
-                bs_mat,
-            )
+        full_kron[:, :] = get_full_operator(operators, bs, gdim, element)
 
         pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
@@ -527,167 +480,6 @@ def get_vertices(mesh: dolfinx.mesh.Mesh):
     vertices = mesh.geometry.dofmap.reshape(num_cells, -1)
 
     return vertices, coords, gdim
-
-
-def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int):
-    """
-    Get permutation for Lagrange basis
-
-    Args:
-        form (dolfinx.fem.Form): form object
-        deg (int): degree of the basis
-        gdim (int): mesh dimension`
-    Returns:
-        permutation (np.array): permutation array
-    """
-    dof_coords = form.function_spaces[0].element.basix_element.points
-    permutation = np.zeros(dof_coords.shape[0], dtype=np.uint32)
-
-    if gdim == 1:
-        for ind, coord in enumerate(dof_coords):
-            index = int(coord[0] * deg)
-            permutation[index] = ind
-
-    elif gdim == 2:
-        for ind, coord in enumerate(dof_coords):
-            index_i = int(coord[0] * deg)
-            index_j = int(coord[1] * deg)
-            # TODO - investigate why j goes before i here
-            permutation[index_i * (deg + 1) + index_j] = ind
-
-    elif gdim == 3:
-        for ind, coord in enumerate(dof_coords):
-            index_i = int(coord[0] * deg)
-            index_j = int(coord[1] * deg)
-            index_k = int(coord[2] * deg)
-            permutation[index_k * (deg + 1) ** 2 + index_j * (deg + 1) + index_i] = ind
-
-    else:
-        raise ValueError("Invalid mesh dimension")
-
-    return permutation
-
-
-def stack_and_shift(arr: np.ndarray, repeats: int, shift: int) -> np.ndarray:
-    """
-    Make ``repeats`` copies of the array ``arr`` and stack them
-    after adding a shift to each successive copy. Used to expand
-    the number of degrees of freedom attached to each variable in
-    a blocked manner, by appending shifted copies of the array.
-
-    Args:
-        arr (np.ndarray): array to repeat
-        repeats (int): number of repeats
-        shift (int): shift value
-
-    Returns:
-        np.ndarray: stacked and shifted array
-    """
-    shifts = np.arange(repeats) * shift
-    shifts = np.repeat(shifts, len(arr))
-
-    repeated_arr = np.tile(arr, repeats)
-
-    return repeated_arr + shifts
-
-
-def interleave_and_shift(arr: np.ndarray, n: int, shift: int) -> np.ndarray:
-    """
-    Repeat each element of ``arr`` ``n`` times and each
-    successive element is shifted by ``shift``. Used to expand
-    the number of degrees of freedom attached to each variable
-    in a blocked manner while keeping the their order.
-
-    Args:
-        arr (np.ndarray): array to repeat
-        n (int): number of repeats
-        shift (int): shift value
-
-    Returns:
-        np.ndarray: interleaved and shifted array
-    """
-    repeated_values = np.repeat(arr, n)
-    increments = np.tile(np.arange(n) * shift, len(arr))
-
-    return repeated_values + increments
-
-
-def interleave_and_expand(arr: np.ndarray, n: int) -> np.ndarray:
-    """
-    Repeat each element of ``arr`` ``n`` times and multiply
-    all of them by ``n``. Successive elements are then
-    incremented. Used to expand the number of degrees of
-    freedom attached to each variable in a contiguous manner.
-
-    Args:
-        arr (np.ndarray): array to repeat
-        n (int): number of repeats
-
-    Returns:
-        np.ndarray: interleaved and incremented array
-    """
-    repeated_values = np.repeat(arr, n)
-    increments = np.tile(np.arange(n), len(arr))
-
-    return repeated_values * n + increments
-
-
-@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def get_nnz_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
-    temp_dofs = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
-    nnz_per_row = np.zeros(rows, dtype=np.int32)
-
-    for cell in cells:
-        for row_idx in dofmap[cell, :]:
-            for dof in dofmap[cell, :]:
-                found = False
-                # Linear search is used here because maintaining a sorted
-                # array is expected to be expensive
-                for i in range(nnz_per_row[row_idx]):
-                    if temp_dofs[row_idx, i] == dof:
-                        found = True
-                        break
-                if not found:
-                    temp_dofs[row_idx, nnz_per_row[row_idx]] = dof
-                    nnz_per_row[row_idx] += 1
-
-    return nnz_per_row
-
-
-@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def get_csr_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
-    dofs_per_row = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
-    nnz_per_row = np.zeros(rows, dtype=np.int32)
-
-    for cell in cells:
-        for row_idx in dofmap[cell, :]:
-            for dof in dofmap[cell, :]:
-                found = False
-                # Linear search is used here because maintaining a sorted
-                # array is expected to be expensive
-                for i in range(nnz_per_row[row_idx]):
-                    if dofs_per_row[row_idx, i] == dof:
-                        found = True
-                        break
-                if not found:
-                    dofs_per_row[row_idx, nnz_per_row[row_idx]] = dof
-                    nnz_per_row[row_idx] += 1
-
-    index_ptr = np.zeros(rows + 1, dtype=np.int32)
-    for i in range(rows):
-        index_ptr[i + 1] = index_ptr[i] + nnz_per_row[i]
-
-    indices = np.zeros(index_ptr[-1], dtype=np.int32)
-
-    index = 0
-    for row, row_dofs in enumerate(dofs_per_row):
-        sorted_dofs = np.sort(row_dofs[:nnz_per_row[row]])
-
-        for i in range(nnz_per_row[row]):
-            indices[index] = sorted_dofs[i]
-            index += 1
-
-    return index_ptr, indices
 
 
 def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, debug=False, rtol=1e-12):

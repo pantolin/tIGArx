@@ -1,4 +1,6 @@
 import abc
+
+import dolfinx
 import numpy as np
 
 from tIGArx.common import worldcomm, DEFAULT_PREALLOC
@@ -58,14 +60,25 @@ class AbstractScalarBasis(object):
         return
 
     @abc.abstractmethod
-    def getCpDofmap(self, cells: np.ndarray):
+    def getCpDofmap(self, cells: np.ndarray, block_size=1):
         """
-        Returns a list of the form ``[dof0, dof1, ...]``, where
-        ``dof_i`` is the global degree of freedom index of the
+        Returns a list of lists, eac of the form ``[dof0, dof1, ...]``
+        , where ``dof_i`` is the global degree of freedom index of the
         ``i``-th basis function, and thus the associated control
         point.
         """
         return
+
+    def getExtractionOrdering(self, mesh: dolfinx.mesh.Mesh):
+        """
+        Returns a list of the form ``[cell0, cell1, ...]``, where
+        ``cell_i`` is an integer corresponding to the global index
+        in the dolfinx ordering of the ``i``-th cell, used in the
+        assembly of the extraction matrix. The mesh is provided as
+        the topological ordering is used in 3D, but BEWARE OF 2D, it
+        is likely that the ordering is not the same as the topological.
+        """
+        return mesh.topology.original_cell_index
 
     @abc.abstractmethod
     def generateMesh(self, comm=worldcomm):

@@ -578,11 +578,18 @@ class BSpline(AbstractScalarBasis):
         if self.nvar > 3 or self.nvar < 1:
             print("ERROR: Unsupported parametric dimension.")
             exit()
+
+        # # If the degrees are not equal, local extraction is not possible
+        # if len(set(degrees)) > 1:
+        #     print("ERROR: Local extraction is not possible with unequal degrees.")
+        #     exit()
+
         self.splines: list[BSpline1] = []
         for i in range(0, self.nvar):
             self.splines += [
                 BSpline1(degrees[i], kvecs[i]),
             ]
+
         self.overRefine = overRefine
         self.ncp = self.computeNcp()
         self.nel = self.computeNel()
@@ -851,7 +858,10 @@ class BSpline(AbstractScalarBasis):
                     + v_span * u_spline.nel
                     + u_span)
 
-    def getCpDofmap(self, cells: np.ndarray, block_size=1):
+    def getCpDofmap(self, cells: np.ndarray | None = None, block_size=1):
+        if cells is None:
+            cells = np.arange(self.nel, dtype=np.int32)
+
         dofs: np.ndarray
 
         if self.nvar == 1:
@@ -928,6 +938,88 @@ class BSpline(AbstractScalarBasis):
                 ).reshape(-1)
 
                 dofs[i, :] = interleave_and_shift(temp_dofs, block_size, self.getNcp())
+
+        return dofs
+
+    def getFEDofmap(self, cells: np.ndarray | None = None) -> np.ndarray:
+        if cells is None:
+            cells = np.arange(self.nel, dtype=np.int32)
+
+        dofs: np.ndarray
+
+        if self.nvar == 1:
+            dofs = np.empty((cells.shape[0], self.splines[0].p + 1), dtype=np.int32)
+
+            for i, cell in enumerate(cells.data):
+                start_idx = self.splines[0].p * cell
+                dofs[i, :] = np.arange(start_idx, start_idx + self.splines[0].p + 1)
+
+        elif self.nvar == 2:
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+
+            dofs = np.empty(
+                (cells.shape[0], (u_spline.p + 1) * (v_spline.p + 1)),
+                dtype=np.int32
+            )
+
+            n_u = u_spline.nel
+            n_u_dofs = n_u * u_spline.p + 1
+
+            for i, cell in enumerate(cells.data):
+                v_span = cell // n_u
+                u_span = cell % n_u
+
+                u_start = u_spline.p * u_span
+                v_start = v_spline.p * v_span
+
+                u_range = np.arange(u_start, u_start + u_spline.p + 1)
+                v_range = np.arange(v_start, v_start + v_spline.p + 1)
+
+                dofs[i, :] = np.add.outer(
+                    v_range * n_u_dofs,
+                    u_range
+                ).reshape(-1)
+
+        else:
+            u_spline = self.splines[0]
+            v_spline = self.splines[1]
+            w_spline = self.splines[2]
+
+            dofs = np.empty(
+                (
+                    cells.shape[0],
+                    (u_spline.p + 1) * (v_spline.p + 1) * (w_spline.p + 1)
+                ),
+                dtype=np.int32
+            )
+
+            n_u = u_spline.nel
+            n_v = v_spline.nel
+
+            n_u_dofs = n_u * u_spline.p + 1
+            n_v_dofs = n_v * v_spline.p + 1
+
+            for i, cell in enumerate(cells.data):
+                w_span = cell // (n_u * n_v)
+                v_span = (cell // n_u) % n_v
+                u_span = cell % n_u
+
+                u_start = u_spline.p * u_span
+                v_start = v_spline.p * v_span
+                w_start = w_spline.p * w_span
+
+                u_range = np.arange(u_start, u_start + u_spline.p + 1)
+                v_range = np.arange(v_start, v_start + v_spline.p + 1)
+                w_range = np.arange(w_start, w_start + w_spline.p + 1)
+
+                dofs[i, :] = np.add.outer(
+                    w_range * (n_u_dofs * n_v_dofs),
+                    np.add.outer(
+                        v_range * n_u_dofs,
+                        u_range
+                    ).reshape(-1)
+                ).reshape(-1)
 
         return dofs
 
@@ -1402,6 +1494,75 @@ class ExplicitBSplineControlMesh(AbstractControlMesh):
         else:
             coord = 0.0
         return coord
+
+    def get_all_control_points(self) -> np.ndarray:
+        """
+        Returns all control points in homogeneous coordinates.
+        """
+        cp_coords = np.empty(
+            (self.scalarSpline.getNcp(), self.nsd + 1), dtype=np.float64
+        )
+
+        if self.nvar == 1:
+            for i in range(self.scalarSpline.getNcp()):
+                cp_coords[i, 0] = self.scalarSpline.splines[0].greville(i)
+                cp_coords[i, 1] = 1.0
+
+        elif self.nvar == 2:
+            # Use the tensor product structure of the B-spline
+            u_spline = self.scalarSpline.splines[0]
+            v_spline = self.scalarSpline.splines[1]
+
+            n_u = u_spline.getNcp()
+            n_v = v_spline.getNcp()
+
+            u_cp_coords = np.empty(u_spline.getNcp(), dtype=np.float64)
+            v_cp_coords = np.empty(v_spline.getNcp(), dtype=np.float64)
+
+            for i in range(u_spline.getNcp()):
+                u_cp_coords[i] = u_spline.greville(i)
+
+            for j in range(v_spline.getNcp()):
+                v_cp_coords[j] = v_spline.greville(j)
+
+            for j in range(n_v):
+                for i in range(n_u):
+                    cp_coords[j * n_u + i, 0] = u_cp_coords[i]
+                    cp_coords[j * n_u + i, 1] = v_cp_coords[j]
+                    cp_coords[j * n_u + i, 2] = 1.0
+
+        else:
+            # Use the tensor product structure of the B-spline
+            u_spline = self.scalarSpline.splines[0]
+            v_spline = self.scalarSpline.splines[1]
+            w_spline = self.scalarSpline.splines[2]
+
+            n_u = u_spline.getNcp()
+            n_v = v_spline.getNcp()
+            n_w = w_spline.getNcp()
+
+            u_cp_coords = np.empty(u_spline.getNcp(), dtype=np.float64)
+            v_cp_coords = np.empty(v_spline.getNcp(), dtype=np.float64)
+            w_cp_coords = np.empty(w_spline.getNcp(), dtype=np.float64)
+
+            for i in range(u_spline.getNcp()):
+                u_cp_coords[i] = u_spline.greville(i)
+
+            for j in range(v_spline.getNcp()):
+                v_cp_coords[j] = v_spline.greville(j)
+
+            for k in range(w_spline.getNcp()):
+                w_cp_coords[k] = w_spline.greville(k)
+
+            for k in range(n_w):
+                for j in range(n_v):
+                    for i in range(n_u):
+                        cp_coords[k * n_v * n_u + j * n_u + i, 0] = u_cp_coords[i]
+                        cp_coords[k * n_v * n_u + j * n_u + i, 1] = v_cp_coords[j]
+                        cp_coords[k * n_v * n_u + j * n_u + i, 2] = w_cp_coords[k]
+                        cp_coords[k * n_v * n_u + j * n_u + i, 3] = 1.0
+
+        return cp_coords
 
     def getNsd(self):
         return self.nsd

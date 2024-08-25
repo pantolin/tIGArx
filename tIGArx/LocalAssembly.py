@@ -234,7 +234,9 @@ def assembly_kernel(
         perf_log.start_timing("Computing extraction operators")
 
     extraction_operators = spline.get_lagrange_extraction_operators()
-    perm = get_lagrange_permutation(form, spline.getDegree(), gdim)
+    perm = get_lagrange_permutation(
+        form.function_spaces[0].element.basix_element.points, spline.getDegree(), gdim
+    )
     permutation = interleave_and_expand(perm, bs)
 
     if profile:
@@ -303,6 +305,45 @@ def assembly_kernel(
         tensor.assemble()
 
     return tensor
+
+
+def extract_control_points(
+        control_points: np.ndarray,
+        spline: AbstractScalarBasis,
+        fe_dofmap: np.ndarray,
+) -> np.ndarray:
+    """
+    Assemble the control points using the given form and spline basis
+
+    Args:
+        control_points (np.ndarray): control points
+        spline (AbstractScalarBasis): scalar basis
+
+    Returns:
+        np.ndarray: The assembled control points
+    """
+
+    cells = spline.get
+    spline_dofmap = spline.getCpDofmap()
+    extraction_operators = spline.get_lagrange_extraction_operators()
+
+    gdim = control_points.shape[1] - 1
+
+    extracted_control_points = np.zeros((spline.getNcp(), gdim + 1), dtype=np.float64)
+
+
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def _extract_control_points(
+        control_points,
+        spline_dofmap,
+        extraction_operators,
+        gdim,
+        extracted_control_points
+):
+    for i in range(control_points.shape[0]):
+        element = spline_dofmap[i]
+        full_kron = get_full_operator(extraction_operators, 1, gdim, element)
+        extracted_control_points[element, :] = full_kron @ control_points[i, :]
 
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)

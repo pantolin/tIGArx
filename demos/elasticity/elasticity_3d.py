@@ -12,7 +12,7 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalAssembly import solve_linear_variational_problem, stack_and_shift, \
+from tIGArx.LocalAssembly import solve_linear_variational_problem, \
     dolfinx_assemble_linear_variational_problem
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
@@ -20,6 +20,7 @@ from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 from tIGArx.ExtractedSpline import ExtractedSpline
 from tIGArx.MultiFieldSplines import EqualOrderSpline
 from tIGArx.timing_util import perf_log
+from tIGArx.utils import stack_and_shift
 
 
 def run_elasticity():

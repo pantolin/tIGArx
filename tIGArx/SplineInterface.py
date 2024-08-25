@@ -60,14 +60,39 @@ class AbstractScalarBasis(object):
         return
 
     @abc.abstractmethod
-    def getCpDofmap(self, cells: np.ndarray, block_size=1):
+    def getCpDofmap(self, cells: np.ndarray | None = None, block_size=1) -> np.ndarray:
         """
-        Returns a list of lists, eac of the form ``[dof0, dof1, ...]``
-        , where ``dof_i`` is the global degree of freedom index of the
-        ``i``-th basis function, and thus the associated control
-        point.
+        Returns a numpy array of control point degrees of freedom associated
+        with the given cells. If ``cells`` is None, then all control points
+        are returned in the Kronecker product order. If a particular order is
+        needed, then the ``cells`` argument should be used.
+
+        Args:
+            cells: A numpy array of cell indices.
+            block_size: The number of values associated with each control point.
+
+        Returns:
+            A numpy array of control point degrees of freedom.
         """
-        return
+        pass
+
+    @abc.abstractmethod
+    def getFEDofmap(self, cells: np.ndarray | None = None) -> np.ndarray:
+        """
+        Returns a numpy array of finite element degrees of freedom associated
+        with the given cells. If ``cells`` is None, then all finite element
+        degrees of freedom are returned in the Kronecker product order. If a
+        particular order is needed, then the ``cells`` argument should be used.
+
+        Args:
+            cells: A numpy array of cell indices.
+            block_size: The number of values associated with each finite element
+                degree of freedom.
+
+        Returns:
+            A numpy array of finite element degrees of freedom.
+        """
+        pass
 
     def getExtractionOrdering(self, mesh: dolfinx.mesh.Mesh):
         """
@@ -114,7 +139,7 @@ class AbstractScalarBasis(object):
         return np.array(np_arr[:, :, 0], dtype=np.int32), np_arr[:, :, 1]
 
     @abc.abstractmethod
-    def get_lagrange_extraction_operators(self):
+    def get_lagrange_extraction_operators(self) -> np.ndarray:
         """
         Returns the extraction operators which are used to map between
         the spline basis and the Lagrange basis. There should be as many
@@ -124,7 +149,7 @@ class AbstractScalarBasis(object):
         remaining two equal to max_degree+1, where max_degree is the
         maximum degree of the Lagrange basis functions / spline basis
         """
-        return
+        pass
 
     # TODO: get rid of the DG stuff in coordinate chart splines, since
     # getNodesAndEvals() is inherently unstable for discontinuous functions
@@ -181,25 +206,32 @@ class AbstractControlMesh(object):
 
     __metaclass__ = abc.ABCMeta
 
-    @ abc.abstractmethod
-    def getHomogeneousCoordinate(self, node, direction):
+    @abc.abstractmethod
+    def getHomogeneousCoordinate(self, node, direction) -> float:
         """
         Returns the ``direction``-th homogeneous component of the control
         point with index ``node``.
         """
-        return
+        pass
 
-    @ abc.abstractmethod
-    def getScalarSpline(self):
+    @abc.abstractmethod
+    def get_all_control_points(self) -> np.ndarray:
+        """
+        Returns a list of all control points in the control mesh.
+        """
+        pass
+
+    @abc.abstractmethod
+    def getScalarSpline(self) -> AbstractScalarBasis:
         """
         Returns the instance of ``AbstractScalarBasis`` that represents
         each homogeneous component of the control mapping.
         """
-        return
+        pass
 
-    @ abc.abstractmethod
-    def getNsd(self):
+    @abc.abstractmethod
+    def getNsd(self) -> int:
         """
         Returns the dimension of physical space.
         """
-        return
+        pass

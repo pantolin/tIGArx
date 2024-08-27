@@ -97,10 +97,7 @@ def local_poisson():
 
         perf_log.start_timing("Extracting solution")
 
-        # Extract the solution at the control points
-        sol = spline.extract_values_to_fe_cps(cp_sol.array_r)
-        size = u.x.index_map.size_local
-        u.x.array[:size] = sol.reshape(-1)
+        spline.extract_cp_solution_to_fe(cp_sol, u)
 
         perf_log.end_timing("Extracting solution")
 

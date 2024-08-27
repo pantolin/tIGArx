@@ -3,6 +3,7 @@ import numba as nb
 
 import dolfinx
 import ufl
+from petsc4py import PETSc
 
 from tIGArx.LocalAssembly import get_full_operator
 from tIGArx.SplineInterface import AbstractControlMesh, AbstractScalarBasis
@@ -186,6 +187,14 @@ class LocallyConstructedSpline:
         extracted_values[:, :-1] /= extracted_values[:, -1][:, np.newaxis]
 
         return extracted_values[:, :-1]
+
+    def extract_cp_solution_to_fe(self, cp_sol: PETSc.Vec, fe_sol: dolfinx.fem.Function):
+        """
+        Extract the solution at the control points to the finite element space.
+        """
+        sol = self.extract_values_to_fe_cps(cp_sol.array_r.reshape(-1, self.dofs_per_cp))
+        size = fe_sol.x.index_map.size_local * fe_sol.x.block_size
+        fe_sol.x.array[:size] = sol.reshape(-1)
 
     def get_fe_cp_coordinates(self):
         """

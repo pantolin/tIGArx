@@ -4,41 +4,30 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalAssembly import assemble_matrix, assemble_vector, \
-    ksp_solve_iteratively, solve_linear_variational_problem, \
+from tIGArx.LocalAssembly import solve_linear_variational_problem, \
     dolfinx_assemble_linear_variational_problem
+from tIGArx.LocalSpline import LocallyConstructedSpline
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
 from tIGArx.timing_util import perf_log
 
 
-def run_poisson():
-
+def local_poisson():
     # Number of levels of refinement with which to run the Poisson problem.
-    # (Note: Paraview output files will correspond to the last/highest level
-    # of refinement.)
-    N_LEVELS = 4
+    # (Note: Paraview output files correspond to the last level.)
+    N_LEVELS = 5
 
-    # Array to store error at different refinement levels:
+    # Array to store error at different refinement levels
     L2_errors = np.zeros(N_LEVELS)
 
     for level in range(0, N_LEVELS):
 
-        ####### Preprocessing #######
-
-        # Parameters determining the polynomial degree and number of elements in
-        # each parametric direction.  By changing these and recording the error,
-        # it is easy to see that the discrete solutions converge at optimal rates
-        # under refinement.
         p = 4
         q = 4
         NELu = 8 * (2**level)
         NELv = 8 * (2**level)
 
-        # Parameters determining the position and size of the domain.
         x0 = 0.0
         y0 = 0.0
         Lx = 1.0
@@ -48,73 +37,24 @@ def run_poisson():
         perf_log.start_timing("Generating control mesh")
 
         # Create a control mesh for which $\Omega = \widehat{\Omega}$.
-        splineMesh = ExplicitBSplineControlMesh(
-            [p, q], [uniform_knots(p, x0, x0 + Lx, NELu),
-                     uniform_knots(q, y0, y0 + Ly, NELv)]
+        spline_mesh = ExplicitBSplineControlMesh(
+            [p, q],
+            [
+                uniform_knots(p, x0, x0 + Lx, NELu),
+                uniform_knots(q, y0, y0 + Ly, NELv)
+            ]
         )
 
         perf_log.end_timing("Generating control mesh")
-        perf_log.start_timing("Generating spline generator")
+        perf_log.start_timing("Generating spline space")
 
-        # Create a spline generator for a spline with a single scalar field on the
-        # given control mesh, where the scalar field is the same as the one used
-        # to determine the mapping $\mathbf{F}:\widehat{\Omega}\to\Omega$.
-        # FIXME
-        splineGenerator = EqualOrderSpline(1, splineMesh)
-        # splineGenerator = EqualOrderSpline(2, splineMesh)
+        quad_order = 2 * max(p, q)
+        spline = LocallyConstructedSpline.get_from_mesh_and_init(
+            spline_mesh, quad_degree=quad_order, dofs_per_cp=1
+        )
 
-        perf_log.end_timing("Generating spline generator")
-        perf_log.start_timing("Setting Dirichlet bcs")
-
-        # Set Dirichlet boundary conditions on the 0-th (and only) field, on both
-        # ends of the domain, in both directions.
-        field = 0
-        scalarSpline = splineGenerator.getScalarSpline(field)
-        for parametricDirection in [0, 1]:
-            for side in [0, 1]:
-                side_dofs = scalarSpline.getSideDofs(parametricDirection, side)
-                splineGenerator.addZeroDofs(field, side_dofs)
-
-        perf_log.end_timing("Setting Dirichlet bcs")
-        perf_log.start_timing("Setting up extracted spline")
-
-        # Alternative: set BCs based on location of corresponding control points.
-        # (Note that this only makes sense for splineGenerator of type
-        # EqualOrderSpline; for non-equal-order splines, there is not
-        # a one-to-one correspondence between degrees of freedom and geometry
-        # control points.)
-
-        # field = 0
-        # def get_boundary(x, on_boundary):
-        #     return (near(x[0],x0) or near(x[0],x0+Lx)
-        #             or near(x[1],y0) or near(x[1],y0+Ly))
-        # splineGenerator.addZeroDofsByLocation(get_boundary(),field)
-
-        # Write extraction data to the filesystem.
-        DIR = "./extraction"
-        # FIXME to uncomment.
-        # splineGenerator.writeExtraction(DIR)
-
-        ####### Analysis #######
-
-        # Choose the quadrature degree to be used throughout the analysis.
-        # In IGA, especially with rational spline spaces, under-integration is a
-        # fact of life, but this does not impair optimal convergence.
-        QUAD_DEG = 2 * max(p, q)
-
-        # Create the extracted spline directly from the generator.
-        # As of version 2019.1, this is required for using quad/hex elements in
-        # parallel.
-        spline = ExtractedSpline(splineGenerator, QUAD_DEG)
-        # spline = ExtractedSpline(DIR, QUAD_DEG)
-
-        # Alternative: Can read the extracted spline back in from the filesystem.
-        # For quad/hex elements, in version 2019.1, this only works in serial.
-
-        # spline = ExtractedSpline(DIR,QUAD_DEG)
-
-        perf_log.end_timing("Setting up extracted spline")
-        perf_log.start_timing("Setting up problem")
+        perf_log.end_timing("Generating spline space")
+        perf_log.start_timing("UFL problem setup")
 
         # Homogeneous coordinate representation of the trial function u.  Because
         # weights are 1 in the B-spline case, this can be used directly in the PDE,
@@ -125,43 +65,47 @@ def run_poisson():
         v = ufl.TestFunction(spline.V)
 
         # Create a force, f, to manufacture the solution, soln
-        x = spline.spatialCoordinates()
+        x = spline.get_fe_cp_coordinates()
         soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * \
             ufl.sin(ufl.pi * (x[1] - y0) / Ly)
         f = -spline.div(spline.grad(soln))
 
-        # Set up and solve the Poisson problem
+        # Define the bilinear form and linear form of the PDE
         a = ufl.inner(spline.grad(u), spline.grad(v)) * spline.dx
         L = ufl.inner(f, v) * spline.dx
         u = dolfinx.fem.Function(spline.V)
         u.name = "u"
 
-        perf_log.end_timing("Setting up problem")
+        perf_log.end_timing("UFL problem setup")
+        perf_log.start_timing("Applying Dirichlet BCs")
+
         side_dofs = []
+        scalar_spline = spline_mesh.getScalarSpline()
         for parametricDirection in [0, 1]:
             for side in [0, 1]:
-                side_dofs.append(scalarSpline.getSideDofs(parametricDirection, side))
+                side_dofs.append(scalar_spline.getSideDofs(parametricDirection, side))
 
         # Filter for unique dofs
         side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
         dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
 
         bcs = {"dirichlet": (side_dofs, dofs_values)}
-        cp_sol = solve_linear_variational_problem(a, L, scalarSpline, bcs, profile=True)
 
-        # Using the global matrix because it is available, the same
-        # effect could be achieved by evaluating the splines at the
-        # desired points and multiplying by the control point
-        # contribution to the solution.
-        sol = splineGenerator.M * cp_sol
+        perf_log.end_timing("Applying Dirichlet BCs")
+
+        cp_sol = solve_linear_variational_problem(a, L, scalar_spline, bcs, profile=True)
+
+        perf_log.start_timing("Extracting solution")
+
+        # Extract the solution at the control points
+        sol = spline.extract_values_to_fe_cps(cp_sol.array_r)
         size = u.x.index_map.size_local
-        u.x.array[:size] = sol.array_r
+        u.x.array[:size] = sol.reshape(-1)
+
+        perf_log.end_timing("Extracting solution")
 
         dolfinx_assemble_linear_variational_problem(a, L, profile=True)
 
-        # convert the values at control points to the values at dofs
-
-        # perf_log.end_timing("Solve problem")
         perf_log.end_timing("Dimension: " + str(NELu) + " x " + str(NELv))
 
         ####### Postprocessing #######
@@ -197,4 +141,4 @@ def run_poisson():
 
 
 if __name__ == "__main__":
-    run_poisson()
+    local_poisson()

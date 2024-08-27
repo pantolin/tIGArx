@@ -167,6 +167,14 @@ class AbstractScalarBasis(object):
         """
         return True
 
+    def getSideDofs(self, direction, side, layers=1):
+        """
+        Returns a list of degrees of freedom on the side of the domain
+        specified by the arguments ``direction`` and ``side``.  The argument
+        ``layers`` specifies how many layers of degrees of freedom to return.
+        """
+        pass
+
     # @abc.abstractmethod
     # def getParametricDimension(self):
     #    return

@@ -94,13 +94,11 @@ def test_extracted_control_points_2d():
 
     spline_generator = EqualOrderSpline(1, spline_mesh)
 
-    local_spline = LocallyConstructedSpline(
+    local_spline = LocallyConstructedSpline.get_from_mesh_and_init(
         spline_mesh, quad_degree=2 * p, dofs_per_cp=1
     )
 
     ref_extracted_cps = spline_generator.cpFuncs
-
-    local_spline.init_extracted_control_points()
     extracted_cps = local_spline.control_point_funcs
 
     np.allclose(extracted_cps[0].x.array, ref_extracted_cps[0].x.array)
@@ -128,13 +126,11 @@ def test_extracted_control_points_3d():
 
     spline_generator = EqualOrderSpline(1, spline_mesh)
 
-    local_spline = LocallyConstructedSpline(
+    local_spline = LocallyConstructedSpline.get_from_mesh_and_init(
         spline_mesh, quad_degree=3 * p, dofs_per_cp=1
     )
 
     ref_extracted_cps = spline_generator.cpFuncs
-
-    local_spline.init_extracted_control_points()
     extracted_cps = local_spline.control_point_funcs
 
     np.allclose(extracted_cps[0].x.array, ref_extracted_cps[0].x.array)

@@ -2,6 +2,7 @@ import numpy as np
 
 import dolfinx
 import basix
+import basix.ufl
 import petsc4py.PETSc as PETSc
 
 from mpi4py import MPI
@@ -197,7 +198,7 @@ def interleave_and_expand(arr: np.ndarray, n: int) -> np.ndarray:
     return repeated_values * n + increments
 
 
-def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int):
+def get_lagrange_permutation(dof_coords: np.ndarray, deg: int, gdim: int):
     """
     Get permutation for Lagrange basis
 
@@ -208,7 +209,6 @@ def get_lagrange_permutation(form: dolfinx.fem.Form, deg: int, gdim: int):
     Returns:
         permutation (np.array): permutation array
     """
-    dof_coords = form.function_spaces[0].element.basix_element.points
     permutation = np.zeros(dof_coords.shape[0], dtype=np.uint32)
 
     if gdim == 1:

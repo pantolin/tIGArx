@@ -28,7 +28,7 @@ def run_elasticity():
     # Number of levels of refinement with which to run the Elasticity problem.
     # (Note: Paraview output files will correspond to the last/highest level
     # of refinement.)
-    N_LEVELS = 4
+    N_LEVELS = 3
 
     # Array to store error at different refinement levels:
     L2_errors = np.zeros(N_LEVELS)
@@ -43,9 +43,9 @@ def run_elasticity():
         # each parametric direction.  By changing these and recording the error,
         # it is easy to see that the discrete solutions converge at optimal rates
         # under refinement.
-        p = 1
-        q = 1
-        r = 1
+        p = 3
+        q = 3
+        r = 3
         NELu = 4 * (2**level)
         NELv = 4 * (2**level)
         NELw = 4 * (2**level)
@@ -65,7 +65,8 @@ def run_elasticity():
         Ly = 1.0
         Lz = 1.0
 
-        perf_log.start_timing("Dimension: " + str(NELu) + " x " + str(NELv), True)
+        perf_log.start_timing("Dimension: " + str(NELu) + " x "
+                              + str(NELv) + " x " + str(NELw), True)
         perf_log.start_timing("Generating control mesh")
 
         # Create a control mesh for which $\Omega = \widehat{\Omega}$.
@@ -84,7 +85,7 @@ def run_elasticity():
         # Create a spline generator for a spline with a vector field on the
         # given control mesh, where the field is the same as the one used
         # to determine the mapping $\mathbf{F}:\widehat{\Omega}\to\Omega$.
-        splineGenerator = EqualOrderSpline(2, splineMesh)
+        splineGenerator = EqualOrderSpline(3, splineMesh)
 
         perf_log.end_timing("Generating spline generator")
         perf_log.start_timing("Setting Dirichlet bcs")
@@ -211,7 +212,8 @@ def run_elasticity():
 
         perf_log.end_timing("Solve problem")
         perf_log.end_timing("Solving")
-        perf_log.end_timing("Dimension: " + str(NELu) + " x " + str(NELv))
+        perf_log.end_timing("Dimension: " + str(NELu) + " x "
+                            + str(NELv) + " x " + str(NELw), True)
 
         dolfinx_assemble_linear_variational_problem(a, L, profile=True)
 
@@ -219,8 +221,8 @@ def run_elasticity():
 
         # The solution, u, is in the homogeneous representation, but, again, for
         # B-splines with weight=1, this is the same as the physical representation.
-        with dolfinx.io.VTXWriter(spline.mesh.comm, "results/u.bp", [u]) as vtx:
-            vtx.write(0.0)
+        # with dolfinx.io.VTXWriter(spline.mesh.comm, "results/u.bp", [u]) as vtx:
+        #     vtx.write(0.0)
 
         # Compute and print the $L^2$ error in the discrete solution.
         L2_error_local = dolfinx.fem.assemble_scalar(

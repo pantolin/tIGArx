@@ -3,15 +3,13 @@ import numba as nb
 
 import dolfinx
 import ufl
-from numpy.random import permutation
 
 from tIGArx.LocalAssembly import get_full_operator
 from tIGArx.SplineInterface import AbstractControlMesh
 from tIGArx.calculusUtils import getMetric, mappedNormal, tIGArxMeasure, volumeJacobian, \
     surfaceJacobian, pinvD, getChristoffel
 from tIGArx.common import selfcomm
-from tIGArx.utils import create_ufl_vector_element, createFunctionSpace, \
-    get_lagrange_permutation, createElementType
+from tIGArx.utils import createFunctionSpace, get_lagrange_permutation, createElementType
 
 
 class LocallyConstructedSpline:
@@ -30,12 +28,12 @@ class LocallyConstructedSpline:
         self.mesh: dolfinx.mesh.Mesh = mesh.getScalarSpline().generateMesh()
         self.space_dim = mesh.getNsd()
 
-        self.element_control = createElementType(
+        self.control_element = createElementType(
             self.spline_mesh.getScalarSpline().getDegree(),
             self.space_dim,
             discontinuous=False
         )
-        self.control_space = createFunctionSpace(self.mesh, self.element_control)
+        self.control_space = createFunctionSpace(self.mesh, self.control_element)
 
         self.control_point_funcs = [
             dolfinx.fem.Function(self.control_space) for _ in range(self.space_dim + 1)
@@ -52,30 +50,35 @@ class LocallyConstructedSpline:
         self.control_points = self.spline_mesh.get_all_control_points()
 
         scalar_spline = self.spline_mesh.getScalarSpline()
-        # cells = scalar_spline.getExtractionOrdering(self.mesh)
         cells = np.arange(self.mesh.topology.original_cell_index.size, dtype=np.int32)
+        fe_dofmap = self.control_space.dofmap.list
 
-        spline_dofmap = scalar_spline.getCpDofmap(cells)
+        extraction_dofmap = scalar_spline.getExtractionOrdering(self.mesh)
+        spline_dofmap = scalar_spline.getCpDofmap(extraction_dofmap)
         extraction_operators = scalar_spline.get_lagrange_extraction_operators()
-        # fe_dofmap = self.control_space.dofmap.list
-        fe_dofmap = scalar_spline.getFEDofmap(cells)
 
         self.extracted_control_points = np.zeros(
             (self.control_space.dofmap.index_map.size_local, self.space_dim + 1),
             dtype=np.float64
         )
 
+        perm = get_lagrange_permutation(
+            self.control_space.element.basix_element.points,
+            self.spline_mesh.getScalarSpline().getDegree(),
+            self.space_dim
+        )
+
         _extract_control_points(
             cells,
             spline_dofmap,
+            extraction_dofmap,
             extraction_operators,
             fe_dofmap,
+            perm,
             self.control_points,
             self.extracted_control_points,
             self.space_dim
         )
-
-        permutation = self.control_space.tabulate_dof_coordinates()
 
         size = self.control_point_funcs[0].x.index_map.size_local
 
@@ -125,17 +128,20 @@ class LocallyConstructedSpline:
 def _extract_control_points(
         cells,
         spline_dofmap,
+        extraction_dofmap,
         extraction_operators,
         fe_dofmap,
+        permutation,
         control_points,
         extracted_control_points,
         space_dim,
 ):
     for cell in cells:
-        full_operator = get_full_operator(extraction_operators, 1, space_dim, cell)
+        element = extraction_dofmap[cell]
+        full_operator = get_full_operator(extraction_operators, 1, space_dim, element)
 
         local_cp_range = spline_dofmap[cell]
-        local_fe_range = fe_dofmap[cell]
+        local_fe_range = fe_dofmap[cell][permutation]
 
         extracted_control_points[local_fe_range, :] += (
             full_operator.T @ (control_points[local_cp_range, :])

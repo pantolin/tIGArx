@@ -77,8 +77,8 @@ def test_control_points_3d():
     assert np.allclose(control_points, ref_control_points)
 
 
-def test_cp_func_vectors():
-    p = 3
+def test_extracted_control_points_2d():
+    p = 2
     q = 3
 
     n_u = 9
@@ -101,7 +101,43 @@ def test_cp_func_vectors():
     ref_extracted_cps = spline_generator.cpFuncs
 
     local_spline.init_extracted_control_points()
-
     extracted_cps = local_spline.control_point_funcs
 
-    print(extracted_cps)
+    np.allclose(extracted_cps[0].x.array, ref_extracted_cps[0].x.array)
+    np.allclose(extracted_cps[1].x.array, ref_extracted_cps[1].x.array)
+    np.allclose(extracted_cps[2].x.array, ref_extracted_cps[2].x.array)
+
+
+def test_extracted_control_points_3d():
+    p = 2
+    q = 3
+    r = 4
+
+    n_u = 6
+    n_v = 5
+    n_w = 4
+
+    spline_mesh = ExplicitBSplineControlMesh(
+        [p, q, r],
+        [
+            uniform_knots(p, 0.0, 1.0, n_u),
+            uniform_knots(q, 0.0, 1.0, n_v),
+            uniform_knots(r, 0.0, 1.0, n_w)
+        ],
+    )
+
+    spline_generator = EqualOrderSpline(1, spline_mesh)
+
+    local_spline = LocallyConstructedSpline(
+        spline_mesh, quad_degree=3 * p, dofs_per_cp=1
+    )
+
+    ref_extracted_cps = spline_generator.cpFuncs
+
+    local_spline.init_extracted_control_points()
+    extracted_cps = local_spline.control_point_funcs
+
+    np.allclose(extracted_cps[0].x.array, ref_extracted_cps[0].x.array)
+    np.allclose(extracted_cps[1].x.array, ref_extracted_cps[1].x.array)
+    np.allclose(extracted_cps[2].x.array, ref_extracted_cps[2].x.array)
+    np.allclose(extracted_cps[3].x.array, ref_extracted_cps[3].x.array)

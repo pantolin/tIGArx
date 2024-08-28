@@ -125,9 +125,7 @@ def run_elasticity():
         cp_sol = solve_linear_variational_problem(a, L, scalar_spline, bcs, profile=True)
 
         perf_log.start_timing("Extracting solution")
-
         spline.extract_cp_solution_to_fe(cp_sol, u)
-
         perf_log.end_timing("Extracting solution")
 
         dolfinx_assemble_linear_variational_problem(a, L, profile=True)

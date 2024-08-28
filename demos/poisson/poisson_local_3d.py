@@ -64,7 +64,7 @@ def run_poisson():
         perf_log.end_timing("Generating control mesh")
         perf_log.start_timing("Generating spline space")
 
-        quad_order = 3 * max(p, q, r)
+        quad_order = 2 * max(p, q, r)
         spline = LocallyConstructedSpline.get_from_mesh_and_init(
             spline_mesh, quad_degree=quad_order, dofs_per_cp=1
         )

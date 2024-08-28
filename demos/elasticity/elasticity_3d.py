@@ -18,10 +18,8 @@ from tIGArx.LocalSpline import LocallyConstructedSpline
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
 from tIGArx.timing_util import perf_log
-from tIGArx.utils import stack_and_shift
+from tIGArx.utils import interleave_and_expand
 
 
 def run_elasticity():
@@ -134,7 +132,7 @@ def run_elasticity():
 
         # Filter for unique dofs
         side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
-        side_dofs = stack_and_shift(side_dofs, 3, scalar_spline.getNcp())
+        side_dofs = interleave_and_expand(side_dofs, 3)
         side_dofs = np.array(side_dofs, dtype=np.int32)
         dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
 

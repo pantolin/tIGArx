@@ -2,7 +2,7 @@ import numpy as np
 import numba as nb
 
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.utils import interleave_and_shift
+from tIGArx.utils import interleave_and_expand
 
 
 def reference_dofs_1d(n_u, p, scalar_spline, bs=1):
@@ -10,9 +10,7 @@ def reference_dofs_1d(n_u, p, scalar_spline, bs=1):
 
     for i in range(0, n_u):
         xi = np.array([i / n_u + 1.0e-8])
-        ref_dofs[i, :] = interleave_and_shift(
-            scalar_spline.getNodes(xi), bs, scalar_spline.getNcp()
-        )
+        ref_dofs[i, :] = interleave_and_expand(scalar_spline.getNodes(xi), bs)
 
     return ref_dofs
 
@@ -23,8 +21,8 @@ def reference_dofs_2d(n_u, n_v, p, q, scalar_spline, bs=1):
     for j in range(0, n_v):
         for i in range(0, n_u):
             xi = np.array([i / n_u + 1.0e-8, j / n_v + 1.0e-8])
-            ref_dofs[j * n_u + i, :] = interleave_and_shift(
-                scalar_spline.getNodes(xi), bs, scalar_spline.getNcp()
+            ref_dofs[j * n_u + i, :] = interleave_and_expand(
+                scalar_spline.getNodes(xi), bs
             )
 
     return ref_dofs
@@ -38,8 +36,8 @@ def reference_dofs_3d(n_u, n_v, n_w, p, q, r, scalar_spline, bs=1):
         for j in range(0, n_v):
             for i in range(0, n_u):
                 xi = np.array([i / n_u + 1.0e-8, j / n_v + 1.0e-8, k / n_w + 1.0e-8])
-                ref_dofs[k * n_u * n_v + j * n_u + i, :] = interleave_and_shift(
-                    scalar_spline.getNodes(xi), bs, scalar_spline.getNcp()
+                ref_dofs[k * n_u * n_v + j * n_u + i, :] = interleave_and_expand(
+                    scalar_spline.getNodes(xi), bs
                 )
 
     return ref_dofs

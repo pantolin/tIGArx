@@ -16,7 +16,7 @@ from dolfinx import default_real_type
 
 from tIGArx.common import INDEX_TYPE, worldcomm
 from tIGArx.SplineInterface import AbstractScalarBasis, AbstractControlMesh
-from tIGArx.utils import interleave_and_shift, interleave_and_expand, stack_and_shift
+from tIGArx.utils import interleave_and_expand
 
 
 def uniform_knots(p, start, end, n_elem, periodic=False, continuity_drop=0):
@@ -874,7 +874,7 @@ class BSpline(AbstractScalarBasis):
 
             for i, cell in enumerate(cells.data):
                 temp_dofs = u_indices[cell]
-                dofs[i, :] = interleave_and_shift(temp_dofs, block_size, self.getNcp())
+                dofs[i, :] = interleave_and_expand(temp_dofs, block_size)
 
         elif self.nvar == 2:
             u_spline = self.splines[0]
@@ -902,7 +902,7 @@ class BSpline(AbstractScalarBasis):
                     u_indices[u_span]
                 ).reshape(-1)
 
-                dofs[i, :] = interleave_and_shift(temp_dofs, block_size, self.getNcp())
+                dofs[i, :] = interleave_and_expand(temp_dofs, block_size)
 
         else:
             u_spline = self.splines[0]
@@ -937,7 +937,7 @@ class BSpline(AbstractScalarBasis):
                     ).reshape(-1)
                 ).reshape(-1)
 
-                dofs[i, :] = interleave_and_shift(temp_dofs, block_size, self.getNcp())
+                dofs[i, :] = interleave_and_expand(temp_dofs, block_size)
 
         return dofs
 
@@ -1033,6 +1033,7 @@ class BSpline(AbstractScalarBasis):
 
         elif self.nvar == 2:
             # The 2D case is special, as the ordering is not the same as the
+            # topo
             n_u = self.splines[0].nel
             n_v = self.splines[1].nel
             cell_matrix = np.arange(n_u * n_v, dtype=np.int32).reshape(n_v, n_u)
@@ -1062,9 +1063,11 @@ class BSpline(AbstractScalarBasis):
         interacting: list[np.ndarray] = []
 
         if self.nvar == 1:
-            temp = self.splines[0].interacting_basis_functions()
+            u_inter = self.splines[0].interacting_basis_functions()
             for i in range(self.ncp):
-                interacting.append(stack_and_shift(temp[i], block_size, self.getNcp()))
+                temp = interleave_and_expand(u_inter[i], block_size)
+                for _ in range(block_size):
+                    interacting.append(np.array(temp, dtype=np.int32))
 
         elif self.nvar == 2:
             u_spline = self.splines[0]
@@ -1075,15 +1078,15 @@ class BSpline(AbstractScalarBasis):
 
             for j in range(v_spline.getNcp()):
                 for i in range(u_spline.getNcp()):
-                    temp = stack_and_shift(
+                    temp = interleave_and_expand(
                         np.add.outer(
                             v_inter[j] * u_spline.getNcp(),
                             u_inter[i]
                         ).reshape(-1),
-                        block_size,
-                        self.getNcp()
+                        block_size
                     )
-                    interacting.append(np.array(temp, dtype=np.int32))
+                    for _ in range(block_size):
+                        interacting.append(np.array(temp, dtype=np.int32))
 
         else:
             u_spline = self.splines[0]
@@ -1097,7 +1100,7 @@ class BSpline(AbstractScalarBasis):
             for k in range(w_spline.getNcp()):
                 for j in range(v_spline.getNcp()):
                     for i in range(u_spline.getNcp()):
-                        temp = stack_and_shift(
+                        temp = interleave_and_expand(
                             np.add.outer(
                                 w_inter[k] * (u_spline.getNcp() * v_spline.getNcp()),
                                 np.add.outer(
@@ -1105,13 +1108,13 @@ class BSpline(AbstractScalarBasis):
                                     u_inter[i]
                                 ).reshape(-1)
                             ).reshape(-1),
-                            block_size,
-                            self.getNcp()
+                            block_size
                         )
-                        interacting.append(np.array(temp, dtype=np.int32))
+                        for _ in range(block_size):
+                            interacting.append(np.array(temp, dtype=np.int32))
 
         # repeat the list interacting block_size times
-        interacting = interacting * block_size
+        # interacting = interacting * block_size
 
         index_ptr = np.zeros(self.ncp * block_size + 1, dtype=np.int32)
         index_ptr[0] = 0
@@ -1142,7 +1145,7 @@ class BSpline(AbstractScalarBasis):
             nel *= spline.nel
         return nel
 
-    def getSideDofs(self, direction, side, nLayers=1):
+    def getSideDofs(self, direction, side, layers=1):
         """
         Return the DoFs on a ``side`` (zero or one) that is perpendicular
         to a parametric ``direction`` (0, 1, or 2, capped at
@@ -1153,7 +1156,7 @@ class BSpline(AbstractScalarBasis):
         """
         offsetSign = 1 - 2 * side
         retval = []
-        for absOffset in range(0, nLayers):
+        for absOffset in range(0, layers):
             offset = absOffset * offsetSign
             if side == 0:
                 i = 0

@@ -193,7 +193,7 @@ class LocallyConstructedSpline:
         Extract the solution at the control points to the finite element space.
         """
         sol = self.extract_values_to_fe_cps(
-            cp_sol.array_r.reshape(self.dofs_per_cp, -1).T
+            cp_sol.array_r.reshape(-1, self.dofs_per_cp)
         )
         size = fe_sol.x.index_map.size_local * fe_sol.x.block_size
         fe_sol.x.array[:size] = sol.reshape(-1)

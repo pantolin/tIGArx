@@ -5,7 +5,6 @@ import numba as nb
 
 import dolfinx
 import dolfinx.fem.petsc
-import ufl
 
 from cffi import FFI
 from petsc4py import PETSc
@@ -40,83 +39,6 @@ set_vec.argtypes = [
     ctypes.POINTER(ctypes.c_double),
     ctypes.c_int,
 ]
-
-options = {
-    "cffi_extra_compile_args": [
-        "-O3", "-march=native", "-mtune=native", "-ffast-math"
-    ],
-}
-
-
-def solve_linear_variational_problem(
-        lhs: ufl.form.Form,
-        rhs: ufl.form.Form,
-        spline: AbstractScalarBasis,
-        bcs: dict[str, [np.ndarray, np.ndarray]],
-        rtol=1e-12,
-        profile=False,
-) -> PETSc.Vec:
-    """
-    Solve the linear variational problem using the given forms and
-    spline scalar basis. Returns the solution for control point
-    coefficients in the form of a PETSc vector.
-
-    Args:
-        lhs (ufl.form.Form): left-hand side form
-        rhs (ufl.form.Form): right-hand side form
-        spline (AbstractScalarBasis): scalar basis
-        bcs (dict[str, [np.ndarray, np.ndarray]]): boundary conditions
-        profile (bool, optional): Flag to enable profiling information.
-            Default is False.
-        rtol (float, optional): relative tolerance for the solver.
-            Default is 1e-12.
-
-    Returns:
-        PETSc.Vec: solution vector
-    """
-    if profile:
-        perf_log.start_timing("Solving linear problem", True)
-        perf_log.start_timing("Assembling problem", True)
-
-    lhs_form = dolfinx.fem.form(lhs, jit_options=options)
-    rhs_form = dolfinx.fem.form(rhs, jit_options=options)
-
-    mat = assemble_matrix(lhs_form, spline, profile)
-    vec = assemble_vector(rhs_form, spline, profile)
-
-    # for i in range(mat.block_size):
-    #     for j in range(mat.block_size):
-    #         print(mat[i, j], end=" ")
-    #     print()
-
-    if profile:
-        perf_log.end_timing("Assembling problem")
-        perf_log.start_timing("Applying boundary conditions")
-
-    # TODO - improve support for different types of boundary conditions
-    for kind, bc in bcs.items():
-        bc_pos, bc_vals = bc
-
-        if kind == "dirichlet":
-            mat.zeroRowsColumns(bc_pos, 1.0)
-            vec.setValues(bc_pos, bc_vals, PETSc.InsertMode.INSERT_VALUES)
-        else:
-            raise ValueError("Unknown boundary condition type")
-
-    if (mat.getDiagonal().array == 0).any():
-        raise RuntimeError("Cannot solve a singular system")
-
-    if profile:
-        perf_log.end_timing("Applying boundary conditions")
-        perf_log.start_timing("Solving problem")
-
-    sol = ksp_solve_iteratively(mat, vec, rtol=rtol)
-
-    if profile:
-        perf_log.end_timing("Solving problem")
-        perf_log.end_timing("Solving linear problem")
-
-    return sol
 
 
 def assemble_matrix(
@@ -465,6 +387,30 @@ def _assemble_vector(
         )
 
 
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def _extract_control_points(
+        cells,
+        spline_dofmap,
+        extraction_dofmap,
+        extraction_operators,
+        fe_dofmap,
+        permutation,
+        control_points,
+        extracted_control_points,
+        space_dim,
+):
+    for cell in cells:
+        element = extraction_dofmap[cell]
+        full_operator = get_full_operator(extraction_operators, 1, space_dim, element)
+
+        local_cp_range = spline_dofmap[cell]
+        local_fe_range = fe_dofmap[cell][permutation]
+
+        extracted_control_points[local_fe_range, :] += (
+            full_operator.T @ (control_points[local_cp_range, :])
+        )
+
+
 def get_vertices(mesh: dolfinx.mesh.Mesh):
     """
     Get mesh vertices
@@ -482,74 +428,3 @@ def get_vertices(mesh: dolfinx.mesh.Mesh):
     vertices = mesh.geometry.dofmap.reshape(num_cells, -1)
 
     return vertices, coords, gdim
-
-
-def ksp_solve_iteratively(A: PETSc.Mat, b: PETSc.Vec, debug=False, rtol=1e-12):
-    """
-    Solve the linear system Ax = b using Conjugate Gradient
-    and block JACOBI preconditioning.
-
-    Args:
-        A (PETSc.Mat): The system matrix.
-        b (PETSc.Vec): The right-hand side vector.
-        rtol (float, optional): The relative tolerance for the solver.
-            Default is 1e-12.
-        profile (bool, optional): Flag to enable profiling information.
-            Default is False.
-    Returns:
-        PETSc.Vec: The solution vector.
-    """
-    ksp = PETSc.KSP().create(A.getComm())
-    ksp.setOperators(A)
-    ksp.setType(PETSc.KSP.Type.CG)
-
-    pc = ksp.getPC()
-    pc.setType(PETSc.PC.Type.BJACOBI)
-
-    ksp.setTolerances(rtol=rtol)
-
-    vec = b.copy()
-    if debug:
-        print("-" * 60)
-        print("Using CG solver with BJACOBI preconditioning")
-        print(f"Matrix size:            {A.getSize()[0]}")
-        info = A.getInfo()
-        print(f"No. of non-zeros:       {info['nz_used']}")
-        timer = dolfinx.common.Timer()
-        timer.start()
-
-    ksp.solve(b, vec)
-
-    if debug:
-        print(f"Solve took:             {timer.stop()}")
-        print("-" * 60)
-
-    vec.ghostUpdate(
-        addv=PETSc.InsertMode.INSERT,
-        mode=PETSc.ScatterMode.FORWARD,
-    )
-
-    return vec
-
-
-def dolfinx_assemble_linear_variational_problem(
-        lhs: ufl.form.Form,
-        rhs: ufl.form.Form,
-        profile=False,
-) -> PETSc.Vec:
-    """
-    Test of reference dolfinx tensor assembly time
-    """
-    if profile:
-        perf_log.start_timing("Dolfinx assembly", True)
-
-    lhs_form = dolfinx.fem.form(lhs, jit_options=options)
-    rhs_form = dolfinx.fem.form(rhs, jit_options=options)
-
-    mat = dolfinx.fem.assemble_matrix(lhs_form)
-    vec = dolfinx.fem.assemble_vector(rhs_form)
-
-    if profile:
-        perf_log.end_timing("Dolfinx assembly")
-
-    return mat, vec

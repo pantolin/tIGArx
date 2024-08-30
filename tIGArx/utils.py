@@ -1,3 +1,5 @@
+from venv import create
+
 import numpy as np
 
 import dolfinx
@@ -78,6 +80,66 @@ def createElementType(degree, dim, discontinuous):
         lagrange_variant=variant, discontinuous=discontinuous
     )
     return ufl_elem
+
+
+def create_permuted_element(degree: int , dim: int, discontinuous=False):
+    """
+    Returns an UFL element of the given degree either continuous or
+    discontinuous, although the discontinuous feature should not be
+    used in general. The DOFs of this element are permuted so that
+    they are ordered in a "lexicographic" way, or Kronecker product
+    way, which is the way that the DOFs are ordered in spline
+    spaces. This means a traversal like the following 3rd degree
+    2D element (x-axis to right, y-axis up):
+    12 -- 13 -- 14 -- 15
+    |     |     |     |
+    8 --- 9 --- 10 -- 11
+    |     |     |     |
+    4 --- 5 --- 6 --- 7
+    |     |     |     |
+    0 --- 1 --- 2 --- 3
+
+    Regular dof ordering would be:
+    2 --- 10 -- 11 -- 3
+    |     |     |     |
+    7 --- 14 -- 15 -- 9
+    |     |     |     |
+    6 --- 13 -- 12 -- 8
+    |     |     |     |
+    0 --- 4 --- 5 --- 1
+    Note: this is an active issue and check whether it was resolved
+    https://github.com/FEniCS/basix/issues/846,
+
+    Args:
+        degree (int): degree of the element
+        dim (int): dimension of the element
+        discontinuous (bool): whether the element is discontinuous
+    """
+
+    base_element = basix.create_element(
+        basix.ElementFamily.P,
+        getCellType(dim),
+        degree,
+        basix.LagrangeVariant.equispaced,
+        basix.DPCVariant.unset,
+        discontinuous
+    )
+
+    perm = get_lagrange_permutation(base_element.points, degree, dim)
+
+    element = basix.create_element(
+        basix.ElementFamily.P,
+        getCellType(dim),
+        degree,
+        basix.LagrangeVariant.equispaced,
+        basix.DPCVariant.unset,
+        discontinuous,
+        perm.tolist()
+    )
+
+    ufl_element = basix.ufl._BasixElement(element)
+
+    return ufl_element
 
 
 def createVectorElementType(degrees, dim, discontinuous, nFields):

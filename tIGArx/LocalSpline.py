@@ -5,12 +5,16 @@ import dolfinx
 import ufl
 from petsc4py import PETSc
 
-from tIGArx.LocalAssembly import get_full_operator
-from tIGArx.SplineInterface import AbstractControlMesh, AbstractScalarBasis
+from tIGArx.LocalAssembly import _extract_control_points, assemble_vector, \
+    assemble_matrix
+from tIGArx.SplineInterface import AbstractControlMesh
 from tIGArx.calculusUtils import getMetric, mappedNormal, tIGArxMeasure, volumeJacobian, \
     surfaceJacobian, pinvD, getChristoffel, cartesianGrad, cartesianDiv, cartesianCurl, \
     CurvilinearTensor, curvilinearGrad, curvilinearDiv
 from tIGArx.common import selfcomm
+from tIGArx.solvers import solve_linear_variational_problem, ksp_solve_iteratively, \
+    apply_bcs, options
+from tIGArx.timing_util import perf_log
 from tIGArx.utils import createFunctionSpace, get_lagrange_permutation, \
     createElementType, createVectorElementType
 
@@ -204,6 +208,13 @@ class LocallyConstructedSpline:
         """
         return self.F
 
+    def rationalize(self, u):
+        """
+        Divides its argument ``u`` by the weighting function of the spline's
+        control mesh.
+        """
+        return u / (self.control_point_funcs[-1])
+
     def grad(self, f, F=None):
         """
         Cartesian gradient of ``f`` w.r.t. physical coordinates.
@@ -280,26 +291,115 @@ class LocallyConstructedSpline:
             ff = f
         return curvilinearDiv(ff)
 
+    def project(
+            self,
+            ufl_expr,
+            bcs: dict[str, [np.ndarray, np.ndarray]] = None,
+            rationalize=True,
+            lump_mass=False
+    ) -> dolfinx.fem.Function:
+        """
+        Project a UFL expression to the finite element space.
+        """
+        u = ufl.TrialFunction(self.V)
+        v = ufl.TestFunction(self.V)
 
-@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def _extract_control_points(
-        cells,
-        spline_dofmap,
-        extraction_dofmap,
-        extraction_operators,
-        fe_dofmap,
-        permutation,
-        control_points,
-        extracted_control_points,
-        space_dim,
-):
-    for cell in cells:
-        element = extraction_dofmap[cell]
-        full_operator = get_full_operator(extraction_operators, 1, space_dim, element)
+        u = self.rationalize(u)
+        v = self.rationalize(v)
 
-        local_cp_range = spline_dofmap[cell]
-        local_fe_range = fe_dofmap[cell][permutation]
+        rhs_form = ufl.inner(ufl_expr, v) * self.dx
+        ret_val = dolfinx.fem.Function(self.V)
 
-        extracted_control_points[local_fe_range, :] += (
-            full_operator.T @ (control_points[local_cp_range, :])
-        )
+        if not lump_mass:
+            lhs_form = ufl.inner(u, v) * self.dx
+
+            sol = solve_linear_variational_problem(
+                lhs_form,
+                rhs_form,
+                self.spline_mesh.getScalarSpline(),
+                bcs,
+                profile=False
+            )
+
+            self.extract_cp_solution_to_fe(sol, ret_val)
+        else:
+            # TODO: Implement for dolfinx
+            assert False
+
+        if rationalize:
+            ret_val = self.rationalize(ret_val)
+
+        return ret_val
+
+    def solve_nonlinear_variational_problem(
+            self,
+            jac: ufl.form.Form,
+            res: ufl.form.Form,
+            u: dolfinx.fem.Function,
+            bcs: dict[str, [np.ndarray, np.ndarray]],
+            rtol=1e-12,
+            profile=False,
+    ) -> (bool, int, float):
+        """
+        Solve the nonlinear variational problem using the given forms and
+        spline scalar basis. Returns the solution for control point
+        coefficients in the form of a PETSc vector.
+
+        Args:
+            jac (ufl.form.Form): Jacobian form
+            res (ufl.form.Form): residual form
+            u (dolfinx.fem.Function): initial guess and solution
+            spline (AbstractScalarBasis): scalar basis
+            bcs (dict[str, [np.ndarray, np.ndarray]]): boundary conditions
+            profile (bool, optional): Flag to enable profiling information.
+                Default is False.
+            rtol (float, optional): relative tolerance for the solver.
+                Default is 1e-12.
+
+        Returns:
+            bool: flag indicating convergence
+            int: number of iterations
+            float: final relative error
+        """
+        jac_form = dolfinx.fem.form(jac, jit_options=options)
+        res_form = dolfinx.fem.form(res, jit_options=options)
+        scalar_spline = self.spline_mesh.getScalarSpline()
+
+        converged = False
+        n_iter = 0
+        ref_error = 1.0
+
+        for i in range(100):
+            if profile:
+                perf_log.start_timing("Assembling problem", True)
+
+            jac_mat = assemble_matrix(jac_form, scalar_spline, profile)
+            res_vec = assemble_vector(res_form, scalar_spline, profile)
+
+            apply_bcs(jac_mat, res_vec, bcs)
+
+            if profile:
+                perf_log.end_timing("Assembling problem")
+                perf_log.start_timing("Solving problem")
+
+            res_norm = res_vec.norm(PETSc.NormType.NORM_2)
+            if i == 0:
+                ref_error = res_norm
+            else:
+                print(f"Iteration {i} error: {res_norm / ref_error}")
+
+            rel_norm = res_norm / ref_error
+            if rel_norm < rtol:
+                converged = True
+                n_iter = i
+                ref_error = rel_norm
+                break
+
+            sol = ksp_solve_iteratively(jac_mat, res_vec, rtol=rtol)
+            extracted_sol = self.extract_values_to_fe_cps(sol.array).reshape(-1)
+            u.x.array[:] -= extracted_sol
+
+            if profile:
+                perf_log.end_timing("Solving problem")
+
+        return converged, n_iter, ref_error

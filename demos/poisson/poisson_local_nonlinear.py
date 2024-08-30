@@ -7,8 +7,6 @@ from mpi4py import MPI
 from tIGArx.LocalSpline import LocallyConstructedSpline
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.solvers import solve_linear_variational_problem, \
-    dolfinx_assemble_linear_variational_problem
 
 from tIGArx.timing_util import perf_log
 
@@ -33,6 +31,8 @@ def local_poisson():
         Lx = 1.0
         Ly = 1.0
 
+        alpha = 10.0
+
         perf_log.start_timing("Dimension: " + str(NELu) + " x " + str(NELv), True)
         perf_log.start_timing("Generating control mesh")
 
@@ -56,25 +56,24 @@ def local_poisson():
         perf_log.end_timing("Generating spline space")
         perf_log.start_timing("UFL problem setup")
 
-        # Homogeneous coordinate representation of the trial function u.  Because
-        # weights are 1 in the B-spline case, this can be used directly in the PDE,
-        # without dividing through by weight.
-        u = ufl.TrialFunction(spline.V)
-
-        # Corresponding test function.
-        v = ufl.TestFunction(spline.V)
-
         # Create a force, f, to manufacture the solution, soln
         x = spline.get_fe_cp_coordinates()
         soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * \
-            ufl.sin(ufl.pi * (x[1] - y0) / Ly)
-        f = -spline.div(spline.grad(soln))
+               ufl.sin(ufl.pi * (x[1] - y0) / Ly)
+        f = -spline.div(spline.grad(soln)) + alpha * soln * soln * soln
 
-        # Define the bilinear form and linear form of the PDE
-        a = ufl.inner(spline.grad(u), spline.grad(v)) * spline.dx
-        L = ufl.inner(f, v) * spline.dx
+        # u = spline.project(soln, rationalize=False, lump_mass=False)
         u = dolfinx.fem.Function(spline.V)
         u.name = "u"
+
+        v = ufl.TestFunction(spline.V)
+
+        # Define the bilinear form and linear form of the PDE
+        residual = (ufl.inner(spline.grad(u), spline.grad(v))
+                    + alpha * ufl.inner(u, u) * ufl.inner(u, v)
+                    - ufl.inner(f, v)) * spline.dx
+        jacobian = ufl.derivative(residual, u)
+
 
         perf_log.end_timing("UFL problem setup")
         perf_log.start_timing("Applying Dirichlet BCs")
@@ -89,19 +88,14 @@ def local_poisson():
         side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
         dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
 
+        # set all dofs in u which are not on the side to 0
+        # u.x.array[np.setdiff1d(np.arange(len(u.x.array)), side_dofs)] = 0.0
+
         bcs = {"dirichlet": (side_dofs, dofs_values)}
 
         perf_log.end_timing("Applying Dirichlet BCs")
 
-        cp_sol = solve_linear_variational_problem(a, L, scalar_spline, bcs, profile=True)
-
-        perf_log.start_timing("Extracting solution")
-
-        spline.extract_cp_solution_to_fe(cp_sol, u)
-
-        perf_log.end_timing("Extracting solution")
-
-        dolfinx_assemble_linear_variational_problem(a, L, profile=True)
+        spline.solve_nonlinear_variational_problem(jacobian, residual, u, bcs)
 
         perf_log.end_timing("Dimension: " + str(NELu) + " x " + str(NELv))
 

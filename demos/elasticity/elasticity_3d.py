@@ -12,11 +12,11 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalAssembly import solve_linear_variational_problem, \
-    dolfinx_assemble_linear_variational_problem
 from tIGArx.LocalSpline import LocallyConstructedSpline
 from tIGArx.common import mpirank
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tIGArx.solvers import solve_linear_variational_problem, \
+    dolfinx_assemble_linear_variational_problem
 
 from tIGArx.timing_util import perf_log
 from tIGArx.utils import interleave_and_expand
@@ -150,8 +150,6 @@ def run_elasticity():
 
         perf_log.end_timing("Dimension: " + str(NELu) + " x "
                             + str(NELv) + " x " + str(NELw), True)
-
-        dolfinx_assemble_linear_variational_problem(a, L, profile=True)
 
         ####### Postprocessing #######
 

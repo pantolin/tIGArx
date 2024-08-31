@@ -386,7 +386,8 @@ class LocallyConstructedSpline:
             if i == 0:
                 ref_error = res_norm
             else:
-                print(f"Iteration {i} error: {res_norm / ref_error}")
+                if profile:
+                    print(f"Iteration {i} error: {res_norm / ref_error}")
 
             rel_norm = res_norm / ref_error
             if rel_norm < rtol:

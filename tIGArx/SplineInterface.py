@@ -122,6 +122,14 @@ class AbstractScalarBasis(object):
         """
         return
 
+    def getNumLocalDofs(self):
+        """
+        Returns the number of local degrees of freedom for this basis. It
+        should not be confused with the number of local dofs in the
+        Lagrange basis, it can be lower than that.
+        """
+        return self.getNcp()
+
     def getAllNodesAndEvals(self, xi_arr):
         """
         Given a numpy array of parametric points ``xi``, return two numpy

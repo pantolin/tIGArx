@@ -68,9 +68,9 @@ def compute_local_bezier_extraction_operators(k_vec, p):
     """
     Compute the local extraction operators for a B-spline basis with knot
     vector ``k_vec`` and polynomial degree ``p``.  The extraction operators
-    are used to extract the spline basis functions from the Lagrange
+    are used to extract the spline basis functions from the Bernstein
     basis functions - transforming the basis functions from the Bezier
-    space to the spline space.
+    space to the B-spline space.
 
     Args:
         k_vec: numpy array of floats, Knot vector
@@ -450,15 +450,40 @@ class BSpline1(object):
 
         return ders
 
-    def compute_local_lagrange_extraction_operator(self):
+    def compute_local_lagrange_extraction_operator(self, order=None):
+        """
+        Compute the local Lagrange extraction operator for the B-spline basis.
+        By default the order will be the same as the polynomial degree of the
+        B-spline basis. However, optionally it can be higher to allow for
+        higher-order extraction. The matrices in this case are no longer
+        square but of shape (self.p + 1, order + 1).
+
+        Args:
+            order: int, Order of the extraction operator
+
+        Returns:
+            3D numpy tensor, local extraction operators of shape
+            (self.nel, self.p + 1, order + 1) where order = self.p if
+            not specified
+        """
+        # Right now periodic B-splines are not supported
+        assert self.multiplicities[0] == self.multiplicities[-1] == self.p + 1
+
         p = self.p
+        if order is None:
+            order = p
+        else:
+            if order < p:
+                print("ERROR: Order of extraction operator must be at "
+                      "least the same as the polynomial degree.")
+                exit()
 
         # C-order is vital for numba
-        operators = np.zeros((self.nel, p + 1, p + 1),
+        operators = np.zeros((self.nel, p + 1, order + 1),
                              dtype=default_real_type, order='C')
 
         value = self.basisFuncs(p, self.uniqueKnots[0])
-        operators[0, 0, :] = np.array(value, order='C')
+        operators[0, :, 0] = np.array(value, order='C')
 
         start_func = 0
 
@@ -467,15 +492,15 @@ class BSpline1(object):
             end_knot = self.uniqueKnots[i + 1]
 
             # Subdivide the interval into p sub-intervals
-            h = (end_knot - start_knot) / p
+            h = (end_knot - start_knot) / order
             m = self.multiplicities[i + 1]
             # Compute the extraction operator for each sub-interval
-            for j in range(1, p + 1):
+            for j in range(1, order + 1):
                 value = self.basisFuncs(start_func + p, start_knot + j * h)
                 operators[i, :, j] = np.array(value, order='C')
 
             if i < self.nel - 1:
-                operators[i + 1, 0:(p + 1 - m), 0] = operators[i, m:(p + 1), p]
+                operators[i + 1, 0:(p + 1 - m), 0] = operators[i, m:(p + 1), order]
 
             start_func += m
 
@@ -826,6 +851,12 @@ class BSpline(AbstractScalarBasis):
             deg = max(deg, self.splines[i].p)
         return deg
 
+    def getNumLocalDofs(self):
+        deg = 1
+        for i in range(0, self.nvar):
+            deg *= self.splines[i].p + 1
+        return deg
+
     def getElement(self, xi):
         """
         Returns the element index that contains the point ``xi``.
@@ -1135,9 +1166,10 @@ class BSpline(AbstractScalarBasis):
         unique knot span.
         """
         operators = []
+        order = self.getDegree()
         for i in range(0, self.nvar):
             operators += [
-                self.splines[i].compute_local_lagrange_extraction_operator(),
+                self.splines[i].compute_local_lagrange_extraction_operator(order=order),
             ]
         return operators
 

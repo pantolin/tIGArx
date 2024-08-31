@@ -142,12 +142,12 @@ def test_compute_lagrange_extraction_operators():
     ])
 
     # Stacking these arrays along a new third dimension to form a 3D tensor
-    reference = np.stack((d_1, d_2, d_3, d_4), axis=2)
+    reference = np.stack((d_1, d_2, d_3, d_4), axis=0)
 
     np.allclose(extraction_operators, reference)
 
 
-def test_compute_lagrange_extraction_operators_2():
+def test_compute_lagrange_extraction_operators_cont_drop():
     knots = uniform_knots(3, 0.0, 4.0, 4, continuity_drop=1)
     spline = BSpline1(3, knots)
 
@@ -184,7 +184,53 @@ def test_compute_lagrange_extraction_operators_2():
     ])
 
     # Stacking these arrays along a new third dimension to form a 3D tensor
-    reference = np.stack((d_1, d_2, d_3, d_4), axis=2)
+    reference = np.stack((d_1, d_2, d_3, d_4), axis=0)
 
     np.allclose(extraction_operators, reference)
 
+
+def test_compute_lagrange_extraction_operators_elevated():
+    p = 3
+    knots = uniform_knots(p, 0.0, 4.0, 4, continuity_drop=0)
+    spline = BSpline1(p, knots)
+
+    extraction_operators = spline.compute_local_lagrange_extraction_operator(order=p + 1)
+    print(extraction_operators)
+    # Reference data obtained from MATLAB by implementing a slightly
+    # modified version of Algorithm 1 from paper by Schillinger et al.
+    d_1 = np.array([
+        [1.000000000000000, 0.421875000000000, 0.125000000000000, 0.015625000000000, 0],
+        [0, 0.496093750000000, 0.593750000000000, 0.457031250000000, 0.250000000000000],
+        [0, 0.079427083333333, 0.260416666666667, 0.457031250000000, 0.583333333333333],
+        [0, 0.002604166666667, 0.020833333333333, 0.070312500000000, 0.166666666666667]
+    ])
+
+    d_2 = np.array([
+        [0.250000000000000, 0.105468750000000, 0.031250000000000, 0.003906250000000, 0],
+        [0.583333333333333, 0.576822916666667, 0.468750000000000, 0.313802083333333,
+         0.166666666666667],
+        [0.166666666666667, 0.315104166666667, 0.479166666666667, 0.611979166666667,
+         0.666666666666667],
+        [0, 0.002604166666667, 0.020833333333333, 0.070312500000000, 0.166666666666667]
+    ])
+
+    d_3 = np.array([
+        [0.166666666666667, 0.070312500000000, 0.020833333333333, 0.002604166666667, 0],
+        [0.666666666666667, 0.611979166666667, 0.479166666666667, 0.315104166666667,
+         0.166666666666667],
+        [0.166666666666667, 0.313802083333333, 0.468750000000000, 0.576822916666667,
+         0.583333333333333],
+        [0, 0.003906250000000, 0.031250000000000, 0.105468750000000, 0.250000000000000]
+    ])
+
+    d_4 = np.array([
+        [0.166666666666667, 0.070312500000000, 0.020833333333333, 0.002604166666667, 0],
+        [0.583333333333333, 0.457031250000000, 0.260416666666667, 0.079427083333333, 0],
+        [0.250000000000000, 0.457031250000000, 0.593750000000000, 0.496093750000000, 0],
+        [0, 0.015625000000000, 0.125000000000000, 0.421875000000000, 1.000000000000000]
+    ])
+
+    # Stacking these arrays along a new third dimension to form a 3D tensor
+    reference = np.stack((d_1, d_2, d_3, d_4), axis=0)
+
+    np.allclose(extraction_operators, reference)

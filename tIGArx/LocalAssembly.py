@@ -97,9 +97,9 @@ def assembly_kernel(
 
     cells = np.arange(form.mesh.topology.original_cell_index.size, dtype=np.int32)
     bs = form.function_spaces[0].dofmap.index_map_bs
-    num_loc_dofs = bs
-    for _ in range(gdim):
-        num_loc_dofs *= (spline.getDegree() + 1)
+
+    spline_loc_dofs = spline.getNumLocalDofs() * bs
+    lagrange_loc_dofs = bs * (spline.getDegree() + 1) ** gdim
 
     if profile:
         perf_log.end_timing("Getting basic data")
@@ -183,7 +183,8 @@ def assembly_kernel(
                     vertices,
                     coords,
                     spline_dofmap,
-                    num_loc_dofs,
+                    lagrange_loc_dofs,
+                    spline_loc_dofs,
                     coeffs,
                     consts,
                     cells,
@@ -203,7 +204,8 @@ def assembly_kernel(
                     vertices,
                     coords,
                     spline_dofmap,
-                    num_loc_dofs,
+                    lagrange_loc_dofs,
+                    spline_loc_dofs,
                     coeffs,
                     consts,
                     cells,
@@ -268,7 +270,8 @@ def _assemble_matrix(
         vertices,
         coords,
         dofmap,
-        num_loc_dofs,
+        lagrange_loc_dofs,
+        spline_loc_dofs,
         coeffs,
         consts,
         cells,
@@ -288,20 +291,24 @@ def _assemble_matrix(
     # Don't permute
     perm = np.array([0], dtype=np.uint8)
 
-    # Allocating memory for the local matrix and the full Kronecker product
-    mat_local = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
-    full_kron = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
+    # Allocating memory for the local matrices
+    lagrange_local = np.zeros(
+        (lagrange_loc_dofs, lagrange_loc_dofs), dtype=PETSc.ScalarType
+    )
+    spline_local = np.zeros(
+        (spline_loc_dofs, spline_loc_dofs), dtype=PETSc.ScalarType
+    )
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        full_kron[:, :] = get_full_operator(operators, bs, gdim, element)
+        full_kron = get_full_operator(operators, bs, gdim, element)
 
         pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
-        mat_local.fill(0.0)
+        lagrange_local.fill(0.0)
 
         kernel(
-            ffi.from_buffer(mat_local),
+            ffi.from_buffer(lagrange_local),
             ffi.from_buffer(coeffs[cell]),
             ffi.from_buffer(consts),
             ffi.from_buffer(cell_coords),
@@ -311,17 +318,16 @@ def _assemble_matrix(
 
         # Permute the rows and columns so that they match the
         # indexing of the spline basis
-        mat_local[:, :] = mat_local[permutation, :][:, permutation]
-        mat_local[:, :] = full_kron @ mat_local @ full_kron.T
+        lagrange_local[:, :] = lagrange_local[permutation, :][:, permutation]
+        spline_local[:, :] = full_kron @ lagrange_local @ full_kron.T
 
-        # mat_handle.setValues(pos, pos, mat_local, PETSc.InsertMode.ADD_VALUES)
         set_vals(
             mat_handle,
-            num_loc_dofs,
+            spline_loc_dofs,
             pos.ctypes,
-            num_loc_dofs,
+            spline_loc_dofs,
             pos.ctypes,
-            mat_local.ctypes,
+            spline_local.ctypes,
             mode
         )
 
@@ -333,7 +339,8 @@ def _assemble_vector(
         vertices,
         coords,
         dofmap,
-        num_loc_dofs,
+        lagrange_loc_dofs,
+        spline_loc_dofs,
         coeffs,
         consts,
         cells,
@@ -353,20 +360,20 @@ def _assemble_vector(
     # Don't permute
     perm = np.array([0], dtype=np.uint8)
 
-    # Allocating memory for the local vector and the full Kronecker product
-    vec_local = np.zeros(num_loc_dofs, dtype=PETSc.ScalarType)
-    full_kron = np.zeros((num_loc_dofs, num_loc_dofs), dtype=PETSc.ScalarType)
+    # Allocating memory for the local vectors
+    lagrange_local = np.zeros(lagrange_loc_dofs, dtype=PETSc.ScalarType)
+    spline_local = np.zeros(spline_loc_dofs, dtype=PETSc.ScalarType)
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        full_kron[:, :] = get_full_operator(operators, bs, gdim, element)
+        full_kron = get_full_operator(operators, bs, gdim, element)
 
         pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
-        vec_local.fill(0.0)
+        lagrange_local.fill(0.0)
 
         kernel(
-            ffi.from_buffer(vec_local),
+            ffi.from_buffer(lagrange_local),
             ffi.from_buffer(coeffs[cell]),
             ffi.from_buffer(consts),
             ffi.from_buffer(cell_coords),
@@ -374,15 +381,13 @@ def _assemble_vector(
             ffi.from_buffer(perm),
         )
 
-        vec_local[:] = vec_local[permutation]
-        vec_local[:] = full_kron @ vec_local
+        spline_local[:] = full_kron @ lagrange_local[permutation]
 
-        # vec.setValues(pos, vec_local, PETSc.InsertMode.ADD_VALUES)
         set_vals(
             vec,
-            num_loc_dofs,
+            spline_loc_dofs,
             pos.ctypes,
-            vec_local.ctypes,
+            spline_local.ctypes,
             mode
         )
 

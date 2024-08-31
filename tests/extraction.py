@@ -145,3 +145,46 @@ def test_compute_lagrange_extraction_operators():
     reference = np.stack((d_1, d_2, d_3, d_4), axis=2)
 
     np.allclose(extraction_operators, reference)
+
+
+def test_compute_lagrange_extraction_operators_2():
+    knots = uniform_knots(3, 0.0, 4.0, 4, continuity_drop=1)
+    spline = BSpline1(3, knots)
+
+    extraction_operators = spline.compute_local_lagrange_extraction_operator()
+
+    # Reference data obtained from MATLAB by implementing a slightly
+    # modified version of Algorithm 1 from paper by Schillinger et al.
+    d_1 = np.array([
+        [1.000000000000000, 0.296296296296296, 0.037037037037037, 0],
+        [0, 0.444444444444445, 0.222222222222222, 0],
+        [0, 0.240740740740741, 0.592592592592593, 0.500000000000000],
+        [0, 0.018518518518519, 0.148148148148148, 0.500000000000000]
+    ])
+
+    d_2 = np.array([
+        [0.500000000000000, 0.148148148148148, 0.018518518518519, 0],
+        [0.500000000000000, 0.592592592592593, 0.240740740740741, 0],
+        [0, 0.240740740740741, 0.592592592592593, 0.500000000000000],
+        [0, 0.018518518518519, 0.148148148148148, 0.500000000000000]
+    ])
+
+    d_3 = np.array([
+        [0.500000000000000, 0.148148148148148, 0.018518518518518, 0],
+        [0.500000000000000, 0.592592592592593, 0.240740740740740, 0],
+        [0, 0.240740740740741, 0.592592592592593, 0.500000000000000],
+        [0, 0.018518518518519, 0.148148148148148, 0.500000000000000]
+    ])
+
+    d_4 = np.array([
+        [0.500000000000000, 0.148148148148148, 0.018518518518519, 0],
+        [0.500000000000000, 0.592592592592593, 0.240740740740741, 0],
+        [0, 0.222222222222222, 0.444444444444444, 0],
+        [0, 0.037037037037037, 0.296296296296296, 1.000000000000000]
+    ])
+
+    # Stacking these arrays along a new third dimension to form a 3D tensor
+    reference = np.stack((d_1, d_2, d_3, d_4), axis=2)
+
+    np.allclose(extraction_operators, reference)
+

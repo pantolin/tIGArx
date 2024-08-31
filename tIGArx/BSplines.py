@@ -453,11 +453,14 @@ class BSpline1(object):
     def compute_local_lagrange_extraction_operator(self):
         p = self.p
 
+        # C-order is vital for numba
         operators = np.zeros((self.nel, p + 1, p + 1),
                              dtype=default_real_type, order='C')
 
         value = self.basisFuncs(p, self.uniqueKnots[0])
         operators[0, 0, :] = np.array(value, order='C')
+
+        start_func = 0
 
         for i in range(0, self.nel):
             start_knot = self.uniqueKnots[i]
@@ -465,14 +468,16 @@ class BSpline1(object):
 
             # Subdivide the interval into p sub-intervals
             h = (end_knot - start_knot) / p
-
+            m = self.multiplicities[i + 1]
             # Compute the extraction operator for each sub-interval
             for j in range(1, p + 1):
-                value = self.basisFuncs(i + p, start_knot + j * h)
+                value = self.basisFuncs(start_func + p, start_knot + j * h)
                 operators[i, :, j] = np.array(value, order='C')
 
             if i < self.nel - 1:
-                operators[i + 1, 0:p, 0] = operators[i, 1:(p + 1), p]
+                operators[i + 1, 0:(p + 1 - m), 0] = operators[i, m:(p + 1), p]
+
+            start_func += m
 
         return np.ascontiguousarray(operators)
 

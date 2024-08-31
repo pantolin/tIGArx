@@ -82,7 +82,7 @@ def createElementType(degree, dim, discontinuous):
     return ufl_elem
 
 
-def create_permuted_element(degree: int , dim: int, discontinuous=False):
+def create_permuted_element(degree: int , dim: int, dofs_per_cp=1, discontinuous=False):
     """
     Returns an UFL element of the given degree either continuous or
     discontinuous, although the discontinuous feature should not be
@@ -113,6 +113,7 @@ def create_permuted_element(degree: int , dim: int, discontinuous=False):
     Args:
         degree (int): degree of the element
         dim (int): dimension of the element
+        dofs_per_cp (int): number of degrees of freedom per control point
         discontinuous (bool): whether the element is discontinuous
     """
 
@@ -138,6 +139,8 @@ def create_permuted_element(degree: int , dim: int, discontinuous=False):
     )
 
     ufl_element = basix.ufl._BasixElement(element)
+    if dofs_per_cp > 1:
+        ufl_element = basix.ufl.blocked_element(ufl_element, shape=(dofs_per_cp,))
 
     return ufl_element
 

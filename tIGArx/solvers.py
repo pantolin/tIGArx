@@ -10,11 +10,44 @@ from tIGArx.SplineInterface import AbstractScalarBasis
 from tIGArx.timing_util import perf_log
 
 
-options = {
-    "cffi_extra_compile_args": [
-        "-O3", "-march=native", "-mtune=native", "-ffast-math"
-    ],
-}
+import platform
+
+if platform.system() == "Windows":
+    # MSVC optimization flags, effectively all CPUs have AVX2
+    options = {
+        "cffi_extra_compile_args": [
+            "/O2", "/arch:AVX2", "/fp:fast"
+        ],
+    }
+elif platform.system() == "Linux":
+    # GCC optimization flags for Linux
+    options = {
+        "cffi_extra_compile_args": [
+            "-O3", "-march=native", "-mtune=native", "-ffast-math"
+        ],
+    }
+elif platform.system() == "Darwin":
+    # Clang optimization flags for macOS
+    if platform.machine() == "arm64":
+        # ARM (Apple Silicon) with general ARM architecture, adding
+        # -mcpu=apple-m1 or similar instead of -march=native is also possible
+        options = {
+            "cffi_extra_compile_args": [
+                "-O3", "-march=native", "-ffast-math"
+            ],
+        }
+    else:
+        # Intel-based macOS - same as Linux
+        options = {
+            "cffi_extra_compile_args": [
+                "-O3", "-march=native", "-mtune=native", "-ffast-math"
+            ],
+        }
+else:
+    # Default case - no optimization flags
+    options = {
+        "cffi_extra_compile_args": [],
+    }
 
 
 def solve_linear_variational_problem(

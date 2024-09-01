@@ -40,6 +40,7 @@ import ufl
 from dolfinx import default_real_type
 
 from tIGArx.common import mpirank
+from tIGArx.solvers import solve_linear_variational_problem
 from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
 from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
 
@@ -294,6 +295,8 @@ res = dWmass + dWint + dWext
 # Use derivative() to obtain the consistent tangent of the nonlinear residual,
 # considered as a function of displacement in homogeneous coordinates.
 dRes = ufl.derivative(res, y_hom)
+
+solve_linear_variational_problem(dRes, res, controlMesh.getScalarSpline(), bcs={})
 
 # Apply an initial condition to the sphere's velocity.
 # Note: Seems like the interpolation component by component

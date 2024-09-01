@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import abc
 
 import dolfinx
@@ -115,20 +117,24 @@ class AbstractScalarBasis(object):
         return
 
     @abc.abstractmethod
-    def getDegree(self):
+    def getDegree(self) -> int:
         """
         Returns a polynomial degree for FEs that is sufficient for extracting
         this spline basis.
         """
-        return
+        pass
 
-    def getNumLocalDofs(self):
+    @abc.abstractmethod
+    def getNumLocalDofs(self, block_size=1) -> list[int]:
         """
         Returns the number of local degrees of freedom for this basis. It
         should not be confused with the number of local dofs in the
-        Lagrange basis, it can be lower than that.
+        Lagrange basis, it can be lower than that. It is a list because
+        it turns out that in some cases, the number of local dofs can vary
+        depending on the cell. If the number of local dofs is constant, then
+        the list should contain only one element.
         """
-        return self.getNcp()
+        pass
 
     def getAllNodesAndEvals(self, xi_arr):
         """
@@ -147,15 +153,17 @@ class AbstractScalarBasis(object):
         return np.array(np_arr[:, :, 0], dtype=np.int32), np_arr[:, :, 1]
 
     @abc.abstractmethod
-    def get_lagrange_extraction_operators(self) -> np.ndarray:
+    def get_lagrange_extraction_operators(self) -> list[list[np.ndarray] | np.ndarray]:
         """
         Returns the extraction operators which are used to map between
-        the spline basis and the Lagrange basis. There should be as many
-        elements in the returned array as there are dimensions and each
-        element should be a 3D numpy array, with the first dimension being
-        the number of basis functions in the spline basis, and the
-        remaining two equal to max_degree+1, where max_degree is the
-        maximum degree of the Lagrange basis functions / spline basis
+        the spline basis and the Lagrange basis. There are tensor
+        product elements, thus one can return a list of operator lists.
+        Then a tensor product of these operators will be used to
+        construct the full operator. On the other hand, if the extraction
+        operators cannot be assembled in this way, then the list should
+        contain only one element. The structure of list elements is
+        the same in both cases: either a list of 2D numpy arrays, or a
+        3D numpy array (more efficient, but not always possible).
         """
         pass
 
@@ -202,15 +210,21 @@ class AbstractScalarBasis(object):
         """
         return DEFAULT_PREALLOC
 
-    def getCSRPrealloc(self, block_size=1):
+    def getCSRPrealloc(self, block_size=1) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns a pair of numpy arrays, the first of which is the index
         pointer array for a CSR matrix, and the second of which is the
         column index array for a CSR matrix. The pre-allocation needs to
-        be exact for the CSR matrix to be efficient. The argument
-        ``block_size`` is the number of basis functions that are associated
-        with each control point.
+        be exact for the CSR matrix.
+
+        Args:
+            block_size: The number of values associated with each degree of freedom.
+
+        Returns:
+            A pair of numpy arrays, the first of which is the index pointer
+            array and the second of which is the column index array.
         """
+        pass
 
 
 # interface needed for a control mesh with a coordinate chart

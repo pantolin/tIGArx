@@ -176,6 +176,7 @@ class LocallyConstructedSpline:
         extraction_dofmap = scalar_spline.getExtractionOrdering(self.mesh)
         spline_dofmap = scalar_spline.getCpDofmap(extraction_dofmap)
         extraction_operators = scalar_spline.get_lagrange_extraction_operators()
+        is_tensor_operator = len(extraction_operators) != 1
 
         extracted_values = np.zeros(
             (self.control_space.dofmap.index_map.size_local, values.shape[1]),

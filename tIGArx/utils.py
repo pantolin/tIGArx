@@ -1,13 +1,10 @@
-from venv import create
-
 import numpy as np
+import numba as nb
 
 import dolfinx
 import basix
 import basix.ufl
 import petsc4py.PETSc as PETSc
-
-from mpi4py import MPI
 
 from tIGArx.common import worldcomm, INDEX_TYPE, mpisize, mpirank
 
@@ -255,3 +252,57 @@ def get_lagrange_permutation(dof_coords: np.ndarray, deg: int, gdim: int):
         raise ValueError("Invalid mesh dimension")
 
     return permutation
+
+
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def get_csr_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
+    """
+    Quite an inefficient way to get the preallocation of a CSR matrix
+    from a dofmap. While it is hardly ideal, it is not terrible for
+    problems with 2D surface meshes, while it is lacking for 3D meshes.
+    It is reintroduced here to help with T-splines, where the dofmap
+    seems to be the most natural way to get the sparsity pattern.
+
+    Args:
+        cells (np.ndarray): array of cells
+        dofmap (np.ndarray): dofmap
+        rows (int): number of rows, i.e. number of dofs (or cps)
+        max_dofs_per_row (int): maximum number of dofs per row, maximum
+            number of interacting cps per each cp
+
+    Returns:
+        index_ptr (np.ndarray): array of pointers to the indices array
+        indices (np.ndarray): array of indices
+    """
+    dofs_per_row = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
+    nnz_per_row = np.zeros(rows, dtype=np.int32)
+
+    for cell in cells:
+        for row_idx in dofmap[cell]:
+            for dof in dofmap[cell]:
+                found = False
+                # Linear search is used here because maintaining a sorted
+                # array is expected to be expensive
+                for i in range(nnz_per_row[row_idx]):
+                    if dofs_per_row[row_idx, i] == dof:
+                        found = True
+                        break
+                if not found:
+                    dofs_per_row[row_idx, nnz_per_row[row_idx]] = dof
+                    nnz_per_row[row_idx] += 1
+
+    index_ptr = np.zeros(rows + 1, dtype=np.int32)
+    for i in range(rows):
+        index_ptr[i + 1] = index_ptr[i] + nnz_per_row[i]
+
+    indices = np.zeros(index_ptr[-1], dtype=np.int32)
+
+    index = 0
+    for row, row_dofs in enumerate(dofs_per_row):
+        sorted_dofs = np.sort(row_dofs[:nnz_per_row[row]])
+
+        for i in range(nnz_per_row[row]):
+            indices[index] = sorted_dofs[i]
+            index += 1
+
+    return index_ptr, indices

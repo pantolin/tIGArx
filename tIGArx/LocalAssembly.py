@@ -98,7 +98,7 @@ def assembly_kernel(
     cells = np.arange(form.mesh.topology.original_cell_index.size, dtype=np.int32)
     bs = form.function_spaces[0].dofmap.index_map_bs
 
-    spline_loc_dofs = spline.getNumLocalDofs() * bs
+    spline_loc_dofs = spline.getNumLocalDofs(block_size=bs)
     lagrange_loc_dofs = bs * (spline.getDegree() + 1) ** gdim
 
     if profile:
@@ -287,7 +287,6 @@ def _assemble_matrix(
     num_loc_vertices = vertices.shape[1]
     cell_coords = np.zeros((num_loc_vertices, 3))
     entity_local_index = np.array([0], dtype=np.intc)
-
     # Don't permute
     perm = np.array([0], dtype=np.uint8)
 
@@ -295,15 +294,11 @@ def _assemble_matrix(
     lagrange_local = np.zeros(
         (lagrange_loc_dofs, lagrange_loc_dofs), dtype=PETSc.ScalarType
     )
-    spline_local = np.zeros(
-        (spline_loc_dofs, spline_loc_dofs), dtype=PETSc.ScalarType
-    )
 
     for cell in cells:
         element = extraction_dofmap[cell]
         full_kron = get_full_operator(operators, bs, gdim, element)
 
-        pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
         lagrange_local.fill(0.0)
 
@@ -319,13 +314,17 @@ def _assemble_matrix(
         # Permute the rows and columns so that they match the
         # indexing of the spline basis
         lagrange_local[:, :] = lagrange_local[permutation, :][:, permutation]
-        spline_local[:, :] = full_kron @ lagrange_local @ full_kron.T
+        spline_local = full_kron @ lagrange_local @ full_kron.T
 
+        pos = dofmap[cell]
+        n_dofs = spline_loc_dofs[0] if len(spline_loc_dofs) == 1 else spline_loc_dofs[cell]
+
+        # mat_handle.setValues(pos, pos, spline_local, PETSc.InsertMode.ADD_VALUES)
         set_vals(
             mat_handle,
-            spline_loc_dofs,
+            n_dofs,
             pos.ctypes,
-            spline_loc_dofs,
+            n_dofs,
             pos.ctypes,
             spline_local.ctypes,
             mode
@@ -362,7 +361,6 @@ def _assemble_vector(
 
     # Allocating memory for the local vectors
     lagrange_local = np.zeros(lagrange_loc_dofs, dtype=PETSc.ScalarType)
-    spline_local = np.zeros(spline_loc_dofs, dtype=PETSc.ScalarType)
 
     for cell in cells:
         element = extraction_dofmap[cell]
@@ -381,11 +379,14 @@ def _assemble_vector(
             ffi.from_buffer(perm),
         )
 
-        spline_local[:] = full_kron @ lagrange_local[permutation]
+        spline_local = full_kron @ lagrange_local[permutation]
+
+        pos = dofmap[cell]
+        n_dofs = spline_loc_dofs[0] if len(spline_loc_dofs) == 1 else spline_loc_dofs[cell]
 
         set_vals(
             vec,
-            spline_loc_dofs,
+            n_dofs,
             pos.ctypes,
             spline_local.ctypes,
             mode

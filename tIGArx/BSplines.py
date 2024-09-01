@@ -851,11 +851,11 @@ class BSpline(AbstractScalarBasis):
             deg = max(deg, self.splines[i].p)
         return deg
 
-    def getNumLocalDofs(self):
+    def getNumLocalDofs(self, block_size=1) -> list[int]:
         deg = 1
         for i in range(0, self.nvar):
             deg *= self.splines[i].p + 1
-        return deg
+        return [deg * block_size]
 
     def getElement(self, xi):
         """
@@ -1095,7 +1095,7 @@ class BSpline(AbstractScalarBasis):
             # ordering in the mesh.
             return mesh.topology.original_cell_index
 
-    def getCSRPrealloc(self, block_size=1):
+    def getCSRPrealloc(self, block_size=1) -> tuple[np.ndarray, np.ndarray]:
         interacting: list[np.ndarray] = []
 
         if self.nvar == 1:

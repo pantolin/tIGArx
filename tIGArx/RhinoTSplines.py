@@ -11,7 +11,8 @@ from tIGArx.BSplines import (
     AbstractControlMesh,
     worldcomm,
 )
-from tIGArx.utils import generateMeshXMLFileName
+from tIGArx.utils import generateMeshXMLFileName, interleave_and_expand, \
+    get_csr_pre_allocation
 from dolfinx import default_real_type
 
 import dolfinx
@@ -106,12 +107,6 @@ def identity_partitioner(
 # the element index, and we have u = x0 - 3.0*i - 1.0, v = x1 for
 # eval-ing shape functions
 class RhinoTSplineScalarBasis(AbstractScalarBasis):
-
-    def get_lagrange_extraction_operators(self):
-        pass
-
-    def getElement(self, xi):
-        pass
 
     def __init__(self, fname):
         """
@@ -227,6 +222,43 @@ class RhinoTSplineScalarBasis(AbstractScalarBasis):
     def getDegree(self):
         return 3
 
+    def getCpDofmap(self, cells: np.ndarray | None = None, block_size=1) -> np.ndarray:
+        dofmap = []
+        for i, nodes in enumerate(self.extractionNodes):
+            temp_dofs = np.array(nodes, dtype=np.int32)
+            dofmap.append(interleave_and_expand(temp_dofs, block_size))
+
+        return dofmap
+
+    def getFEDofmap(self, cells: np.ndarray | None = None) -> np.ndarray:
+        pass
+
+    def get_lagrange_extraction_operators(self) -> list[list[np.ndarray]]:
+        operator_arr = []
+        for i in range(self.nelBez):
+            C = self.extractionOperators[i]
+            operator_arr.append(np.ascontiguousarray(C, dtype=default_real_type))
+
+        return [operator_arr]
+
+    def getElement(self, xi):
+        pass
+
+    def getCSRPrealloc(self, block_size=1) -> tuple[np.ndarray, np.ndarray]:
+        cells = np.arange(len(self.extractionNodes), dtype=np.int32)
+        dofmap = self.getCpDofmap(cells, block_size)
+        dimension = self.getNcp() * block_size
+        max_dofs_per_row = block_size * (2 * self.getDegree() + 1) ** 2
+
+        return get_csr_pre_allocation(cells, dofmap, dimension, max_dofs_per_row)
+
+    def getNumLocalDofs(self, block_size=1) -> list[int]:
+        num_dofs = []
+        for i in range(self.nelBez):
+            num_dofs.append(len(self.extractionNodes[i]) * block_size)
+
+        return num_dofs
+
 
 class RhinoTSplineControlMesh(AbstractControlMesh):
     """
@@ -270,3 +302,6 @@ class RhinoTSplineControlMesh(AbstractControlMesh):
 
     def getNsd(self):
         return self.nsd
+
+    def get_all_control_points(self) -> np.ndarray:
+        return self.bnet

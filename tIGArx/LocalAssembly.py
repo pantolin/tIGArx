@@ -97,6 +97,11 @@ def assembly_kernel(
 
     cells = np.arange(form.mesh.topology.original_cell_index.size, dtype=np.int32)
     bs = form.function_spaces[0].dofmap.index_map_bs
+    # This is to ensure that the get_full_operator function works correctly.
+    # Examples with fewer than 4 cells will not work, because at least
+    # 4 cells are needed to correctly assess the regime of the extraction
+    # (i.e. at least one operator per cell).
+    assert cells.shape[0] > 3
 
     spline_loc_dofs = spline.getNumLocalDofs(block_size=bs)
     lagrange_loc_dofs = bs * (spline.getDegree() + 1) ** gdim

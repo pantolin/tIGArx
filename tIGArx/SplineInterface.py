@@ -78,24 +78,6 @@ class AbstractScalarBasis(object):
         """
         pass
 
-    @abc.abstractmethod
-    def getFEDofmap(self, cells: np.ndarray | None = None) -> np.ndarray:
-        """
-        Returns a numpy array of finite element degrees of freedom associated
-        with the given cells. If ``cells`` is None, then all finite element
-        degrees of freedom are returned in the Kronecker product order. If a
-        particular order is needed, then the ``cells`` argument should be used.
-
-        Args:
-            cells: A numpy array of cell indices.
-            block_size: The number of values associated with each finite element
-                degree of freedom.
-
-        Returns:
-            A numpy array of finite element degrees of freedom.
-        """
-        pass
-
     def getExtractionOrdering(self, mesh: dolfinx.mesh.Mesh):
         """
         Returns a list of the form ``[cell0, cell1, ...]``, where

@@ -232,9 +232,6 @@ class RhinoTSplineScalarBasis(AbstractScalarBasis):
 
         return dofmap
 
-    def getFEDofmap(self, cells: np.ndarray | None = None) -> np.ndarray:
-        pass
-
     def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
         operator_arr = []
         for i in range(self.nelBez):

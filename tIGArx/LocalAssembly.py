@@ -192,7 +192,6 @@ def assembly_kernel(
                     extraction_dofmap,
                     permutation,
                     bs,
-                    gdim,
                     set_mat,
                     PETSc.InsertMode.ADD_VALUES
                 )
@@ -213,7 +212,6 @@ def assembly_kernel(
                     extraction_dofmap,
                     permutation,
                     bs,
-                    gdim,
                     set_vec,
                     PETSc.InsertMode.ADD_VALUES
                 )
@@ -232,7 +230,7 @@ def assembly_kernel(
 
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def get_full_operator(operators, bs, gdim, element):
+def get_full_operator(operators, bs, element):
     if len(operators) == 1:
         return np.kron(
             operators[0][element], np.eye(bs, dtype=PETSc.ScalarType)
@@ -282,7 +280,6 @@ def _assemble_matrix(
         extraction_dofmap,
         permutation,
         bs,
-        gdim,
         set_vals,
         mode
 ):
@@ -300,7 +297,7 @@ def _assemble_matrix(
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        full_kron = get_full_operator(operators, bs, gdim, element)
+        full_kron = get_full_operator(operators, bs, element)
 
         cell_coords[:, :] = coords[vertices[cell, :]]
         lagrange_local.fill(0.0)
@@ -350,7 +347,6 @@ def _assemble_vector(
         extraction_dofmap,
         permutation,
         bs,
-        gdim,
         set_vals,
         mode
 ):
@@ -367,7 +363,7 @@ def _assemble_vector(
 
     for cell in cells:
         element = extraction_dofmap[cell]
-        full_kron = get_full_operator(operators, bs, gdim, element)
+        full_kron = get_full_operator(operators, bs, element)
 
         cell_coords[:, :] = coords[vertices[cell, :]]
         lagrange_local.fill(0.0)
@@ -405,11 +401,10 @@ def _extract_control_points(
         permutation,
         control_points,
         extracted_control_points,
-        space_dim,
 ):
     for cell in cells:
         element = extraction_dofmap[cell]
-        full_operator = get_full_operator(extraction_operators, 1, space_dim, element)
+        full_operator = get_full_operator(extraction_operators, 1, element)
 
         local_cp_range = spline_dofmap[cell]
         local_fe_range = fe_dofmap[cell][permutation]

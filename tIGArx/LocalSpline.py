@@ -197,7 +197,6 @@ class LocallyConstructedSpline:
             perm,
             values,
             extracted_values,
-            self.space_dim
         )
 
         extracted_values[:, :-1] /= extracted_values[:, -1][:, np.newaxis]

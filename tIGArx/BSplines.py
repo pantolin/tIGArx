@@ -504,7 +504,14 @@ class BSpline1(object):
 
             start_func += m
 
-        return np.ascontiguousarray(operators)
+        return operators
+
+        # This is for compatibility purposes with general extraction case
+        # where each element can have a different number of local dofs
+        # operator_list = []
+        # for i in range(self.nel):
+        #     operator_list.append(np.ascontiguousarray(operators[i]))
+
 
     def compute_start_indices(self):
         """
@@ -1160,7 +1167,7 @@ class BSpline(AbstractScalarBasis):
 
         return index_ptr, np.concatenate(interacting)
 
-    def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
+    def get_lagrange_extraction_operators(self) -> list[list[np.ndarray]]:
         """
         Returns a list of local Lagrange extraction operators, one for each
         unique knot span.

@@ -233,10 +233,11 @@ def assembly_kernel(
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def get_full_operator(operators, bs, gdim, element):
-    if gdim == 1 or len(operators) == 1:
-        return np.kron(operators[0][element], np.eye(bs, dtype=PETSc.ScalarType))
-
-    elif gdim == 2:
+    if len(operators) == 1:
+        return np.kron(
+            operators[0][element], np.eye(bs, dtype=PETSc.ScalarType)
+        )
+    elif len(operators) == 2:
         j = element // operators[0].shape[0]
         i = element % operators[0].shape[0]
 
@@ -247,7 +248,7 @@ def get_full_operator(operators, bs, gdim, element):
             ),
             np.eye(bs, dtype=PETSc.ScalarType)
         )
-    else:
+    elif len(operators) == 3:
         k = element // (operators[0].shape[0] * operators[1].shape[0])
         j = (element // operators[0].shape[0]) % operators[1].shape[0]
         i = element % operators[0].shape[0]
@@ -262,6 +263,8 @@ def get_full_operator(operators, bs, gdim, element):
             ),
             np.eye(bs, dtype=PETSc.ScalarType)
         )
+    else:
+        return np.kron(operators[element][0], np.eye(bs, dtype=PETSc.ScalarType))
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _assemble_matrix(
@@ -366,7 +369,6 @@ def _assemble_vector(
         element = extraction_dofmap[cell]
         full_kron = get_full_operator(operators, bs, gdim, element)
 
-        pos = dofmap[cell, :]
         cell_coords[:, :] = coords[vertices[cell, :]]
         lagrange_local.fill(0.0)
 

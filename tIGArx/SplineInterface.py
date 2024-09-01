@@ -125,7 +125,7 @@ class AbstractScalarBasis(object):
         pass
 
     @abc.abstractmethod
-    def getNumLocalDofs(self, block_size=1) -> list[int]:
+    def getNumLocalDofs(self, block_size=1) -> np.ndarray:
         """
         Returns the number of local degrees of freedom for this basis. It
         should not be confused with the number of local dofs in the
@@ -153,17 +153,21 @@ class AbstractScalarBasis(object):
         return np.array(np_arr[:, :, 0], dtype=np.int32), np_arr[:, :, 1]
 
     @abc.abstractmethod
-    def get_lagrange_extraction_operators(self) -> list[list[np.ndarray] | np.ndarray]:
+    def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
         """
         Returns the extraction operators which are used to map between
         the spline basis and the Lagrange basis. There are tensor
-        product elements, thus one can return a list of operator lists.
-        Then a tensor product of these operators will be used to
-        construct the full operator. On the other hand, if the extraction
-        operators cannot be assembled in this way, then the list should
-        contain only one element. The structure of list elements is
-        the same in both cases: either a list of 2D numpy arrays, or a
-        3D numpy array (more efficient, but not always possible).
+        product elements, thus one can return a list of operators. Note
+        that the operators need to be a 3D numpy array, where the first
+        index is the cell, the second index is the local dof of the
+        Lagrange element, and the third index is the local dof of the
+        spline element. If the number of local dofs is not constant or
+        the tensor product cannot be exploited, then the list contains
+        one operator per list element, but the list elements have to be
+        3D numpy arrays as well. The first index is a dummy, only there
+        to facilitate the structure (numba does not support list of lists).
+        The one constraint of this is that one cannot have tensor product
+        elements with a varying number of dofs.
         """
         pass
 

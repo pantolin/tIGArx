@@ -226,20 +226,22 @@ class RhinoTSplineScalarBasis(AbstractScalarBasis):
         dofmap = []
         for i, nodes in enumerate(self.extractionNodes):
             temp_dofs = np.array(nodes, dtype=np.int32)
-            dofmap.append(interleave_and_expand(temp_dofs, block_size))
+            dofmap.append(
+                np.array(interleave_and_expand(temp_dofs, block_size), dtype=np.int32)
+            )
 
         return dofmap
 
     def getFEDofmap(self, cells: np.ndarray | None = None) -> np.ndarray:
         pass
 
-    def get_lagrange_extraction_operators(self) -> list[list[np.ndarray]]:
+    def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
         operator_arr = []
         for i in range(self.nelBez):
-            C = self.extractionOperators[i]
-            operator_arr.append(np.ascontiguousarray(C, dtype=default_real_type))
+            op = np.array(self.extractionOperators[i])[np.newaxis, :, :]
+            operator_arr.append(np.ascontiguousarray(op))
 
-        return [operator_arr]
+        return operator_arr
 
     def getElement(self, xi):
         pass

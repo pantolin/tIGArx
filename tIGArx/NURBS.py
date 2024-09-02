@@ -77,3 +77,6 @@ class NURBSControlMesh(AbstractControlMesh):
 
     def getNsd(self):
         return self.bnet.shape[1] - 1
+
+    def get_all_control_points(self) -> np.ndarray:
+        return self.bnet

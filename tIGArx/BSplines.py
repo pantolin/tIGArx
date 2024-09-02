@@ -12,11 +12,12 @@ import numpy as np
 import numba as nb
 
 import dolfinx
+from cached_property import cached_property
 from dolfinx import default_real_type
 
 from tIGArx.common import INDEX_TYPE, worldcomm
 from tIGArx.SplineInterface import AbstractScalarBasis, AbstractControlMesh
-from tIGArx.utils import interleave_and_expand
+from tIGArx.utils import interleave_and_expand, interleave_and_expand_numba
 
 
 def uniform_knots(p, start, end, n_elem, periodic=False, continuity_drop=0):
@@ -936,16 +937,46 @@ class BSpline(AbstractScalarBasis):
                 dtype=np.int32
             )
 
-            for i, cell in enumerate(cells.data):
-                v_span = cell // u_nel
-                u_span = cell % u_nel
+            @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+            def fill_dofs_2d(
+                    u_indices, v_indices, cells, dofs, u_ncp, u_nel, block_size
+            ):
+                pos = 0
+                for cell in cells:
+                    v_span = cell // u_nel
+                    u_span = cell % u_nel
 
-                temp_dofs = np.add.outer(
-                    v_indices[v_span] * u_spline.getNcp(),
-                    u_indices[u_span]
-                ).reshape(-1)
+                    u_loc = u_indices[u_span]
+                    v_loc = v_indices[v_span]
 
-                dofs[i, :] = interleave_and_expand(temp_dofs, block_size)
+                    n_u = u_loc.size
+                    n_v = v_loc.size
+
+                    temp_dofs = np.zeros(n_u * n_v, dtype=np.int32)
+
+                    for j in range(n_v):
+                        for i in range(n_u):
+                            temp_dofs[j * n_u + i] = v_loc[j] * u_ncp + u_loc[i]
+
+                    dofs[pos, :] = interleave_and_expand_numba(temp_dofs, block_size)
+                    pos += 1
+
+            fill_dofs_2d(
+                u_indices, v_indices, cells, dofs,
+                u_spline.getNcp(), u_nel,
+                block_size
+            )
+
+            # for i, cell in enumerate(cells.data):
+            #     v_span = cell // u_nel
+            #     u_span = cell % u_nel
+            #
+            #     temp_dofs = np.add.outer(
+            #         v_indices[v_span] * u_spline.getNcp(),
+            #         u_indices[u_span]
+            #     ).reshape(-1)
+            #
+            #     dofs[i, :] = interleave_and_expand(temp_dofs, block_size)
 
         else:
             u_spline = self.splines[0]
@@ -967,20 +998,60 @@ class BSpline(AbstractScalarBasis):
                 dtype=np.int32
             )
 
-            for i, cell in enumerate(cells.data):
-                w_span = cell // (u_nel * v_nel)
-                v_span = (cell // u_nel) % v_nel
-                u_span = cell % u_nel
+            @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+            def fill_dofs_3d(
+                    u_indices, v_indices, w_indices, cells, dofs,
+                    u_ncp, v_ncp, u_nel, v_nel, block_size):
+                pos = 0
+                for cell in cells:
+                    w_span = cell // (u_nel * v_nel)
+                    v_span = (cell // u_nel) % v_nel
+                    u_span = cell % u_nel
 
-                temp_dofs = np.add.outer(
-                    w_indices[w_span] * (u_spline.getNcp() * v_spline.getNcp()),
-                    np.add.outer(
-                        v_indices[v_span] * u_spline.getNcp(),
-                        u_indices[u_span]
-                    ).reshape(-1)
-                ).reshape(-1)
+                    u_loc = u_indices[u_span]
+                    v_loc = v_indices[v_span]
+                    w_loc = w_indices[w_span]
 
-                dofs[i, :] = interleave_and_expand(temp_dofs, block_size)
+                    n_u = u_loc.size
+                    n_v = v_loc.size
+                    n_w = w_loc.size
+
+                    temp_dofs = np.zeros(n_u * n_v * n_w, dtype=np.int32)
+
+                    for k in range(n_w):
+                        for j in range(n_v):
+                            for i in range(n_u):
+                                temp_dofs[k * n_v * n_u + j * n_u + i] = (
+                                    w_loc[k] * (u_ncp * v_ncp)
+                                    + v_loc[j] * u_ncp
+                                    + u_loc[i]
+                                )
+
+                    dofs[pos, :] = interleave_and_expand_numba(temp_dofs, block_size)
+                    pos += 1
+
+            fill_dofs_3d(
+                u_indices, v_indices, w_indices,
+                cells, dofs,
+                u_spline.getNcp(), v_spline.getNcp(),
+                u_nel, v_nel,
+                block_size
+            )
+
+            # for i, cell in enumerate(cells.data):
+            #     w_span = cell // (u_nel * v_nel)
+            #     v_span = (cell // u_nel) % v_nel
+            #     u_span = cell % u_nel
+            #
+            #     temp_dofs = np.add.outer(
+            #         w_indices[w_span] * (u_spline.getNcp() * v_spline.getNcp()),
+            #         np.add.outer(
+            #             v_indices[v_span] * u_spline.getNcp(),
+            #             u_indices[u_span]
+            #         ).reshape(-1)
+            #     ).reshape(-1)
+            #
+            #     dofs[i, :] = interleave_and_expand(temp_dofs, block_size)
 
         return dofs
 
@@ -1037,17 +1108,48 @@ class BSpline(AbstractScalarBasis):
             u_inter = u_spline.interacting_basis_functions()
             v_inter = v_spline.interacting_basis_functions()
 
-            for j in range(v_spline.getNcp()):
-                for i in range(u_spline.getNcp()):
-                    temp = interleave_and_expand(
-                        np.add.outer(
-                            v_inter[j] * u_spline.getNcp(),
-                            u_inter[i]
-                        ).reshape(-1),
-                        block_size
-                    )
-                    for _ in range(block_size):
-                        interacting.append(np.array(temp, dtype=np.int32))
+            @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+            def get_interacting_2d(u_inter, v_inter, u_ncp, v_ncp, block_size):
+                interacting = []
+                for j in range(v_ncp):
+                    for i in range(u_ncp):
+                        u_loc = u_inter[i]
+                        v_loc = v_inter[j]
+
+                        n_u = u_loc.size
+                        n_v = v_loc.size
+
+                        temp = np.zeros(n_u * n_v, dtype=np.int32)
+
+                        for jj in range(n_v):
+                            for ii in range(n_u):
+                                temp[jj * n_u + ii] = np.int32(
+                                    v_loc[jj] * u_ncp + u_loc[ii]
+                                )
+
+                        interleaved = interleave_and_expand_numba(temp, block_size)
+                        for _ in range(block_size):
+                            interacting.append(interleaved)
+
+                return interacting
+
+            interacting = get_interacting_2d(
+                u_inter, v_inter,
+                u_spline.getNcp(), v_spline.getNcp(),
+                block_size
+            )
+
+            # for j in range(v_spline.getNcp()):
+            #     for i in range(u_spline.getNcp()):
+            #         temp = interleave_and_expand(
+            #             np.add.outer(
+            #                 v_inter[j] * u_spline.getNcp(),
+            #                 u_inter[i]
+            #             ).reshape(-1),
+            #             block_size
+            #         )
+            #         for _ in range(block_size):
+            #             interacting.append(np.array(temp, dtype=np.int32))
 
         else:
             u_spline = self.splines[0]
@@ -1058,21 +1160,61 @@ class BSpline(AbstractScalarBasis):
             v_inter = v_spline.interacting_basis_functions()
             w_inter = w_spline.interacting_basis_functions()
 
-            for k in range(w_spline.getNcp()):
-                for j in range(v_spline.getNcp()):
-                    for i in range(u_spline.getNcp()):
-                        temp = interleave_and_expand(
-                            np.add.outer(
-                                w_inter[k] * (u_spline.getNcp() * v_spline.getNcp()),
-                                np.add.outer(
-                                    v_inter[j] * u_spline.getNcp(),
-                                    u_inter[i]
-                                ).reshape(-1)
-                            ).reshape(-1),
-                            block_size
-                        )
-                        for _ in range(block_size):
-                            interacting.append(np.array(temp, dtype=np.int32))
+            @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+            def get_interacting_3d(
+                    u_inter, v_inter, w_inter,
+                    u_ncp, v_ncp, w_ncp, block_size
+            ):
+                interacting = []
+                for k in range(w_ncp):
+                    for j in range(v_ncp):
+                        for i in range(u_ncp):
+                            u_loc = u_inter[i]
+                            v_loc = v_inter[j]
+                            w_loc = w_inter[k]
+
+                            n_u = u_loc.size
+                            n_v = v_loc.size
+                            n_w = w_loc.size
+
+                            temp = np.zeros(n_u * n_v * n_w, dtype=np.int32)
+
+                            for l in range(n_w):
+                                for m in range(n_v):
+                                    for n in range(n_u):
+                                        temp[l * n_v * n_u + m * n_u + n] = np.int32(
+                                            w_loc[l] * (u_ncp * v_ncp)
+                                            + v_loc[m] * u_ncp
+                                            + u_loc[n]
+                                        )
+
+                            interleaved = interleave_and_expand_numba(temp, block_size)
+                            for _ in range(block_size):
+                                interacting.append(interleaved)
+
+                return interacting
+
+            interacting = get_interacting_3d(
+                u_inter, v_inter, w_inter,
+                u_spline.getNcp(), v_spline.getNcp(), w_spline.getNcp(),
+                block_size
+            )
+
+            # for k in range(w_spline.getNcp()):
+            #     for j in range(v_spline.getNcp()):
+            #         for i in range(u_spline.getNcp()):
+            #             temp = interleave_and_expand(
+            #                 np.add.outer(
+            #                     w_inter[k] * (u_spline.getNcp() * v_spline.getNcp()),
+            #                     np.add.outer(
+            #                         v_inter[j] * u_spline.getNcp(),
+            #                         u_inter[i]
+            #                     ).reshape(-1)
+            #                 ).reshape(-1),
+            #                 block_size
+            #             )
+            #             for _ in range(block_size):
+            #                 interacting.append(np.array(temp, dtype=np.int32))
 
         # repeat the list interacting block_size times
         # interacting = interacting * block_size

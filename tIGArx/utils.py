@@ -216,14 +216,37 @@ def interleave_and_expand(arr: np.ndarray, n: int) -> np.ndarray:
     return repeated_values * n + increments
 
 
+@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def interleave_and_expand_numba(arr: np.ndarray, n: int) -> np.ndarray:
+    """
+    Repeat each element of ``arr`` ``n`` times and multiply
+    all of them by ``n``. Successive elements are then
+    incremented. Used to expand the number of degrees of
+    freedom attached to each variable in a contiguous manner.
+
+    Args:
+        arr (np.ndarray): array to repeat
+        n (int): number of repeats
+
+    Returns:
+        np.ndarray: interleaved and incremented array
+    """
+    interleaved = np.zeros(arr.size * n, dtype=np.int32)
+    for d in range(arr.size):
+        for b in range(n):
+            interleaved[d * n + b] = np.int32(arr[d] * n + b)
+
+    return interleaved
+
+
 def get_lagrange_permutation(dof_coords: np.ndarray, deg: int, gdim: int):
     """
     Get permutation for Lagrange basis
 
     Args:
-        form (dolfinx.fem.Form): form object
+        dof_coords (np.array): dof coordinates for element
         deg (int): degree of the basis
-        gdim (int): mesh dimension`
+        gdim (int): geometric dimension
     Returns:
         permutation (np.array): permutation array
     """

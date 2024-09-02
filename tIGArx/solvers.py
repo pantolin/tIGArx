@@ -83,8 +83,8 @@ def solve_linear_variational_problem(
     lhs_form = dolfinx.fem.form(lhs, jit_options=options)
     rhs_form = dolfinx.fem.form(rhs, jit_options=options)
 
-    mat = assemble_matrix(lhs_form, spline, profile)
-    vec = assemble_vector(rhs_form, spline, profile)
+    mat = assemble_matrix(lhs_form, spline, profile=profile)
+    vec = assemble_vector(rhs_form, spline, profile=profile)
 
     if profile:
         perf_log.end_timing("Assembling problem")

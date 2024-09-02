@@ -42,7 +42,10 @@ set_vec.argtypes = [
 
 
 def assemble_matrix(
-        form: dolfinx.fem.Form, spline: AbstractScalarBasis, profile=False
+        form: dolfinx.fem.Form,
+        spline: AbstractScalarBasis,
+        mat: PETSc.Mat | None = None,
+        profile=False
 ) -> PETSc.Mat:
     """
     Assemble matrix
@@ -50,17 +53,45 @@ def assemble_matrix(
     Args:
         form (dolfinx.fem.Form): form to assemble
         spline (AbstractScalarBasis): scalar basis
+        mat (PETSc.Mat, optional): matrix to assemble into. Default is None.
         profile (bool, optional): Flag to enable profiling information.
             Default is False.
 
     Returns:
         A (PETSc.Mat): assembled matrix
     """
-    return assembly_kernel(form, spline, profile)
+    if mat is None:
+        if profile:
+            perf_log.start_timing("Computing pre-allocation")
+        bs = form.function_spaces[0].dofmap.index_map_bs
+        csr_allocation = spline.getCSRPrealloc(block_size=bs)
+
+        if profile:
+            perf_log.end_timing("Computing pre-allocation")
+            perf_log.start_timing("Allocating matrix")
+
+        mat = PETSc.Mat(form.mesh.comm)
+        mat.createAIJ(
+            spline.getNcp() * bs,
+            spline.getNcp() * bs,
+            csr=csr_allocation
+        )
+
+        if profile:
+            perf_log.end_timing("Allocating matrix")
+    else:
+        mat.zeroEntries()
+
+
+    assembly_kernel(form, spline, mat, profile)
+    return mat
 
 
 def assemble_vector(
-        form: dolfinx.fem.Form, spline: AbstractScalarBasis, profile=False
+        form: dolfinx.fem.Form,
+        spline: AbstractScalarBasis,
+        vec: PETSc.Vec | None = None,
+        profile=False
 ) -> PETSc.Vec:
     """
     Assemble matrix
@@ -68,23 +99,46 @@ def assemble_vector(
     Args:
         form (dolfinx.fem.Form): form to assemble
         spline (AbstractScalarBasis): scalar basis
+        vec (PETSc.Vec, optional): vector to assemble into. Default is None.
+        profile (bool, optional): Flag to enable profiling information.
+            Default is False.
 
     Returns:
         A (PETSc.Vec): assembled vector
     """
-    return assembly_kernel(form, spline, profile)
+    if vec is None:
+        if profile:
+            perf_log.start_timing("Allocating vector")
+
+        vec = PETSc.Vec(form.mesh.comm)
+        vec.createWithArray(
+            np.zeros(spline.getNcp() * form.function_spaces[0].dofmap.index_map_bs)
+        )
+
+        if profile:
+            perf_log.end_timing("Allocating vector")
+    else:
+        vec.zeroEntries()
+
+    assembly_kernel(form, spline, vec, profile)
+    return vec
 
 
 def assembly_kernel(
-        form: dolfinx.fem.Form, spline: AbstractScalarBasis, profile=False
-) -> PETSc.Mat | PETSc.Vec:
+        form: dolfinx.fem.Form,
+        spline: AbstractScalarBasis,
+        tensor: PETSc.Mat | PETSc.Vec,
+        profile=False
+):
     """
     Assemble the matrix or vector using the given form and spline basis
 
     Args:
         form (dolfinx.fem.Form): form object
         spline (AbstractScalarBasis): scalar basis
-        profile (bool, optional): Flag to enable profiling information. Default is False.
+        tensor (PETSc.Mat | PETSc.Vec): matrix or vector to assemble into
+        profile (bool, optional): Flag to enable profiling information.
+            Default is False.
 
     Returns:
         PETSc.Mat | PETSc.Vec: The assembled matrix or vector
@@ -116,38 +170,7 @@ def assembly_kernel(
     if profile:
         perf_log.end_timing("Creating dofmap")
 
-    # The object that is passed to the assembly routines
-    tensor: PETSc.Mat | PETSc.Vec
-
-    dimension = spline.getNcp() * bs
-
-    if form.rank == 2:
-        if profile:
-            perf_log.start_timing("Computing pre-allocation")
-
-        csr_allocation = spline.getCSRPrealloc(block_size=bs)
-
-        if profile:
-            perf_log.end_timing("Computing pre-allocation")
-            perf_log.start_timing("Allocating rank-2 tensor")
-
-        tensor = PETSc.Mat(form.mesh.comm)
-        tensor.createAIJ(dimension, dimension, csr=csr_allocation)
-
-        if profile:
-            perf_log.end_timing("Allocating rank-2 tensor")
-
-    elif form.rank == 1:
-        if profile:
-            perf_log.start_timing("Allocating rank-1 tensor")
-
-        tensor = PETSc.Vec(form.mesh.comm)
-        tensor = tensor.createWithArray(np.zeros(dimension))
-
-        if profile:
-            perf_log.end_timing("Allocating rank-1 tensor")
-
-    else:
+    if form.rank != 1 and form.rank != 2:
         raise ValueError("Ranks other than 1 and 2 are not supported")
 
     if profile:

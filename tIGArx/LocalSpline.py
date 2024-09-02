@@ -380,25 +380,18 @@ class LocallyConstructedSpline:
         n_iter = 0
         ref_error = 1.0
 
+        # First assembly, the matrix and vector are not passed, but
+        # they are returned for future iterations.
+        jac_mat = assemble_matrix(jac_form, scalar_spline, profile=profile)
+        res_vec = assemble_vector(res_form, scalar_spline, profile=profile)
+        apply_bcs(jac_mat, res_vec, bcs)
+
         for i in range(100):
-            if profile:
-                perf_log.start_timing("Assembling problem", True)
-
-            jac_mat = assemble_matrix(jac_form, scalar_spline, profile)
-            res_vec = assemble_vector(res_form, scalar_spline, profile)
-
-            apply_bcs(jac_mat, res_vec, bcs)
-
-            if profile:
-                perf_log.end_timing("Assembling problem")
-                perf_log.start_timing("Solving problem")
-
             res_norm = res_vec.norm(PETSc.NormType.NORM_2)
             if i == 0:
                 ref_error = res_norm
             else:
-                if profile:
-                    print(f"Iteration {i} error: {res_norm / ref_error}")
+                print(f"Iteration {i} error: {res_norm / ref_error}")
 
             rel_norm = res_norm / ref_error
             if rel_norm < rtol:
@@ -406,6 +399,17 @@ class LocallyConstructedSpline:
                 n_iter = i
                 ref_error = rel_norm
                 break
+
+            if profile:
+                perf_log.start_timing("Assembling problem", True)
+
+            jac_mat = assemble_matrix(jac_form, scalar_spline, jac_mat, profile)
+            res_vec = assemble_vector(res_form, scalar_spline, res_vec, profile)
+            apply_bcs(jac_mat, res_vec, bcs)
+
+            if profile:
+                perf_log.end_timing("Assembling problem")
+                perf_log.start_timing("Solving problem")
 
             sol = ksp_solve_iteratively(jac_mat, res_vec, rtol=rtol)
             extracted_sol = self.extract_values_to_fe_cps(sol.array).reshape(-1)

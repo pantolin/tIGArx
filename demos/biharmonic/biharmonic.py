@@ -21,7 +21,7 @@ import numpy as np
 # Number of levels of refinement with which to run the Poisson problem.
 # (Note: Paraview output files will correspond to the last/highest level
 # of refinement.)
-N_LEVELS = 3
+N_LEVELS = 5
 
 # Array to store error at different refinement levels:
 # L2_errors = zeros(N_LEVELS)
@@ -72,7 +72,7 @@ for level in range(0, N_LEVELS):
                 parametricDirection,
                 side,
                 ##############################
-                nLayers=2,
+                layers=2,
             )  # two layers of CPs
             ##############################
             splineGenerator.addZeroDofs(field, sideDofs)

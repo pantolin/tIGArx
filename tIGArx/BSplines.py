@@ -1255,7 +1255,7 @@ class BSpline(AbstractScalarBasis):
         to a parametric ``direction`` (0, 1, or 2, capped at
         ``self.nvar-1``, obviously).  Can optionally constrain more than
         one layer of control points (e.g., for strongly-enforced clamped BCs
-        on Kirchhoff--Love shells) using ``nLayers`` greater than its
+        on Kirchhoff--Love shells) using ``layers`` greater than its
         default value of one.
         """
         offsetSign = 1 - 2 * side
@@ -1536,14 +1536,14 @@ class BSpline(AbstractScalarBasis):
 #         # assumes all splines have same degree
 #         return self.splines[0].getDegree()
 
-#     def getPatchSideDofs(self, patch, direction, side, nLayers=1):
+#     def getPatchSideDofs(self, patch, direction, side, layers=1):
 #         """
 #         This is analogous to the ``BSpline`` method ``getSideDofs()``, but
 #         it has an extra argument ``patch`` to indicate which patch to obtain
 #         DoFs from.  The returned DoFs are in the global numbering.
 #         """
 #         localSideDofs = self.splines[patch].getSideDofs(
-#             direction, side, nLayers)
+#             direction, side, layers)
 #         retval = []
 #         for dof in localSideDofs:
 #             retval += [
@@ -1572,6 +1572,10 @@ class ExplicitBSplineControlMesh(AbstractControlMesh):
         # parametric == physical
         self.nvar = len(degrees)
         self.nsd = self.nvar + extraDim
+
+        if self.nsd < 1 or self.nsd > 3:
+            print("ERROR: Unsupported space dimension: " + str(self.nsd))
+            exit()
 
     def getScalarSpline(self):
         return self.scalarSpline
@@ -1613,7 +1617,10 @@ class ExplicitBSplineControlMesh(AbstractControlMesh):
         if self.nvar == 1:
             for i in range(self.scalarSpline.getNcp()):
                 cp_coords[i, 0] = self.scalarSpline.splines[0].greville(i)
-                cp_coords[i, 1] = 1.0
+                # Control points can be in 3D
+                for k in range(1, self.nsd):
+                    cp_coords[i, k] = 0.0
+                cp_coords[i, self.nsd] = 1.0
 
         elif self.nvar == 2:
             # Use the tensor product structure of the B-spline
@@ -1636,7 +1643,10 @@ class ExplicitBSplineControlMesh(AbstractControlMesh):
                 for i in range(n_u):
                     cp_coords[j * n_u + i, 0] = u_cp_coords[i]
                     cp_coords[j * n_u + i, 1] = v_cp_coords[j]
-                    cp_coords[j * n_u + i, 2] = 1.0
+                    # Control points can be in 3D
+                    for k in range(2, self.nsd):
+                        cp_coords[j * n_u + i, k] = 0.0
+                    cp_coords[j * n_u + i, self.nsd] = 1.0
 
         else:
             # Use the tensor product structure of the B-spline

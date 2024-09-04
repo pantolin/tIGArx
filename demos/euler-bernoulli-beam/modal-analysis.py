@@ -57,7 +57,7 @@ field = 0
 parametricDirection = 0
 side = 0
 scalarSpline = splineGenerator.getScalarSpline(field)
-sideDofs = scalarSpline.getSideDofs(parametricDirection, side, nLayers=2)
+sideDofs = scalarSpline.getSideDofs(parametricDirection, side, layers=2)
 splineGenerator.addZeroDofs(field, sideDofs)
 
 

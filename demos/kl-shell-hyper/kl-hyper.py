@@ -62,9 +62,9 @@ for side in range(0, 2):
             direction,
             side,
             ########################
-            nLayers=2,
+            layers=2,
         )  # clamped BC
-        # nLayers=1) # pinned BC
+        # layers=1) # pinned BC
         ########################
         for i in range(0, 3):
             splineGenerator.addZeroDofs(i, sideDofs)

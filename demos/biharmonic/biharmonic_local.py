@@ -42,8 +42,11 @@ def biharmonic_local_2d():
 
         # Create a control mesh for which $\Omega = \widehat{\Omega}$.
         spline_mesh = ExplicitBSplineControlMesh(
-            [p, q], [uniform_knots(p, -1.0, 1.0, NELu),
-                     uniform_knots(q, -1.0, 1.0, NELv)]
+            [p, q],
+            [
+                uniform_knots(p, -1.0, 1.0, NELu),
+                uniform_knots(q, -1.0, 1.0, NELv)
+            ]
         )
 
         if mpirank == 0:
@@ -103,7 +106,9 @@ def biharmonic_local_2d():
 
         perf_log.end_timing("Applying Dirichlet BCs")
 
-        cp_sol = solve_linear_variational_problem(lhs, rhs, scalar_spline, bcs, profile=True)
+        cp_sol = solve_linear_variational_problem(
+            lhs, rhs, scalar_spline, bcs, profile=True
+        )
 
         perf_log.start_timing("Extracting solution")
         spline.extract_cp_solution_to_fe(cp_sol, u)

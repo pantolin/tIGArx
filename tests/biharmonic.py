@@ -1,6 +1,8 @@
-import dolfinx
 import numpy as np
+
+import dolfinx
 import ufl
+
 from mpi4py import MPI
 
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
@@ -16,8 +18,11 @@ def test_biharmonic_2d():
     NELv = 16
 
     spline_mesh = ExplicitBSplineControlMesh(
-        [p, q], [uniform_knots(p, -1.0, 1.0, NELu),
-                 uniform_knots(q, -1.0, 1.0, NELv)]
+        [p, q],
+        [
+            uniform_knots(p, -1.0, 1.0, NELu),
+            uniform_knots(q, -1.0, 1.0, NELv)
+        ]
     )
 
     quad_order = 2 * max(p, q)
@@ -32,7 +37,6 @@ def test_biharmonic_2d():
     def lap(x):
         return spline.div(spline.grad(x))
 
-    # Create a force, f, to manufacture the solution, soln
     x = spline.get_fe_cp_coordinates()
     soln = (ufl.cos(ufl.pi * x[0]) + 1.0) * (ufl.cos(ufl.pi * x[1]) + 1.0)
     f = lap(lap(soln))
@@ -49,10 +53,8 @@ def test_biharmonic_2d():
             side_dofs.append(scalar_spline.getSideDofs(
                 parametricDirection,
                 side,
-                ##############################
                 layers=2,
-            ))  # two layers of CPs
-            ##############################
+            ))
 
     side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
     dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
@@ -61,7 +63,6 @@ def test_biharmonic_2d():
     cp_sol = solve_linear_variational_problem(lhs, rhs, scalar_spline, bcs)
     spline.extract_cp_solution_to_fe(cp_sol, u)
 
-    # Compute and print the error in the discrete solution.
     L2_error_local = dolfinx.fem.assemble_scalar(
         dolfinx.fem.form(((u - soln) ** 2) * spline.dx)
     )

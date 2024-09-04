@@ -37,7 +37,7 @@ class LocallyConstructedSpline:
 
         self.control_element = createElementType(
             self.spline_mesh.getScalarSpline().getDegree(),
-            self.space_dim,
+            self.mesh.geometry.dim,
             discontinuous=False
         )
         # self.control_element = create_permuted_element(
@@ -54,7 +54,7 @@ class LocallyConstructedSpline:
 
         self.space_element = createVectorElementType(
             [self.spline_mesh.getScalarSpline().getDegree()] * self.dofs_per_cp,
-            self.space_dim,
+            self.mesh.geometry.dim,
             discontinuous=False,
             nFields=self.dofs_per_cp
         )
@@ -185,7 +185,7 @@ class LocallyConstructedSpline:
         perm = get_lagrange_permutation(
             self.control_space.element.basix_element.points,
             self.spline_mesh.getScalarSpline().getDegree(),
-            self.space_dim
+            self.mesh.geometry.dim
         )
 
         _extract_control_points(
@@ -348,7 +348,7 @@ class LocallyConstructedSpline:
             res: ufl.form.Form,
             u: dolfinx.fem.Function,
             bcs: dict[str, [np.ndarray, np.ndarray]],
-            rtol=1e-12,
+            rtol=1e-10,
             profile=False,
     ) -> (bool, int, float):
         """
@@ -391,7 +391,7 @@ class LocallyConstructedSpline:
             if i == 0:
                 ref_error = res_norm
             else:
-                print(f"Iteration {i} error: {res_norm / ref_error}")
+                print(f"Iteration {i - 1} error: {res_norm / ref_error}")
 
             rel_norm = res_norm / ref_error
             if rel_norm < rtol:
@@ -412,7 +412,9 @@ class LocallyConstructedSpline:
                 perf_log.start_timing("Solving problem")
 
             sol = ksp_solve_iteratively(jac_mat, res_vec, rtol=rtol)
-            extracted_sol = self.extract_values_to_fe_cps(sol.array).reshape(-1)
+            extracted_sol = self.extract_values_to_fe_cps(
+                sol.array_r.reshape(-1, self.dofs_per_cp)
+            ).reshape(-1)
             u.x.array[:] -= extracted_sol
 
             if profile:

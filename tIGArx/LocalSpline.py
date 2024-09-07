@@ -1,8 +1,8 @@
 import numpy as np
-import numba as nb
 
 import dolfinx
 import ufl
+
 from petsc4py import PETSc
 
 from tIGArx.LocalAssembly import _extract_control_points, assemble_vector, \
@@ -209,9 +209,9 @@ class LocallyConstructedSpline:
         """
         sol = self.extract_values_to_fe_cps(
             cp_sol.array_r.reshape(-1, self.dofs_per_cp)
-        )
-        size = fe_sol.x.index_map.size_local * fe_sol.x.block_size
-        fe_sol.x.array[:size] = sol.reshape(-1)
+        ).reshape(-1)
+
+        fe_sol.x.array[:sol.shape[0]] = sol
 
     def get_fe_cp_coordinates(self):
         """

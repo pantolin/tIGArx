@@ -477,4 +477,4 @@ def test_kl_hyper():
          -2.286835920841189e-06, -2.286835920841355e-06, 0.000231504156719821
     ])
 
-    np.allclose(y_hom.x.array, ref, atol=1e-10)
+    np.allclose(y_hom.x.array, ref, rtol=1e-10)

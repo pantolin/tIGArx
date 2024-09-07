@@ -1061,7 +1061,7 @@ class BSpline(AbstractScalarBasis):
         vector.
         """
         if self.nvar == 1:
-            return np.arange(self.splines[0].getNcp(), dtype=np.int32)
+            return np.arange(self.splines[0].nel, dtype=np.int32)
 
         elif self.nvar == 2:
             # The 2D case is special, as the ordering is not the same as the

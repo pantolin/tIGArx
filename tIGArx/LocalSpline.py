@@ -213,7 +213,7 @@ class LocallyConstructedSpline:
 
         fe_sol.x.array[:sol.shape[0]] = sol
 
-    def get_fe_cp_coordinates(self):
+    def get_fe_coordinates(self):
         """
         Return the coordinates of the control points in the finite element space.
         """

@@ -49,7 +49,7 @@ def test_bspline_elasticity_2d():
     def sigma(u):
         return lmbda * spline.div(u) * ufl.Identity(len(u)) + 2 * mu * epsilon(u)
 
-    x = spline.get_fe_cp_coordinates()
+    x = spline.get_fe_coordinates()
     soln = ufl.as_vector([ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]),
                           ufl.sin(2.0 * ufl.pi * x[0]) * ufl.sin(2.0 * ufl.pi * x[1])])
     f = -spline.div(sigma(soln))
@@ -127,7 +127,7 @@ def test_bspline_elasticity_3d():
     def sigma(u):
         return lmbda * spline.div(u) * ufl.Identity(len(u)) + 2 * mu * epsilon(u)
 
-    x = spline.get_fe_cp_coordinates()
+    x = spline.get_fe_coordinates()
     soln0 = (ufl.sin(ufl.pi * x[0])
              * ufl.sin(ufl.pi * x[1])
              * ufl.sin(ufl.pi * x[2]))

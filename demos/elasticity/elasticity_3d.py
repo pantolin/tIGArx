@@ -99,7 +99,7 @@ def run_elasticity():
             return lmbda * spline.div(u) * ufl.Identity(len(u)) + 2 * mu * epsilon(u)
 
         # Create a force, f, to manufacture the solution, soln
-        x = spline.get_fe_cp_coordinates()
+        x = spline.get_fe_coordinates()
         soln0 = (ufl.sin(ufl.pi * (x[0] - x0) / Lx)
                  * ufl.sin(ufl.pi * (x[1] - y0) / Ly)
                  * ufl.sin(ufl.pi * (x[2] - z0) / Lz))

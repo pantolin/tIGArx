@@ -37,7 +37,7 @@ def test_biharmonic_2d():
     def lap(x):
         return spline.div(spline.grad(x))
 
-    x = spline.get_fe_cp_coordinates()
+    x = spline.get_fe_coordinates()
     soln = (ufl.cos(ufl.pi * x[0]) + 1.0) * (ufl.cos(ufl.pi * x[1]) + 1.0)
     f = lap(lap(soln))
 

@@ -13,7 +13,7 @@ from tIGArx.solvers import solve_linear_variational_problem, \
 from tIGArx.timing_util import perf_log
 
 
-def run_poisson():
+def local_poisson_3d():
     # Number of levels of refinement with which to run the Poisson problem.
     # (Note: Paraview output files correspond to the last level.)
     N_LEVELS = 4
@@ -79,7 +79,7 @@ def run_poisson():
         v = ufl.TestFunction(spline.V)
 
         # Create a force, f, to manufacture the solution, soln
-        x = spline.get_fe_cp_coordinates()
+        x = spline.get_fe_coordinates()
         soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * \
             ufl.sin(ufl.pi * (x[1] - y0) / Ly) * \
             ufl.sin(ufl.pi * (x[2] - z0) / Lz)
@@ -148,4 +148,4 @@ def run_poisson():
 
 
 if __name__ == "__main__":
-    run_poisson()
+    local_poisson_3d()

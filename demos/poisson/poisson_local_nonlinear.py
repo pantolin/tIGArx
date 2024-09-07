@@ -57,7 +57,7 @@ def local_poisson():
         perf_log.start_timing("UFL problem setup")
 
         # Create a force, f, to manufacture the solution, soln
-        x = spline.get_fe_cp_coordinates()
+        x = spline.get_fe_coordinates()
         soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * \
                ufl.sin(ufl.pi * (x[1] - y0) / Ly)
         f = -spline.div(spline.grad(soln)) + alpha * soln * soln * soln

@@ -5,8 +5,11 @@ import dolfinx
 
 from mpi4py import MPI
 
+from igakit.nurbs import NURBS as NURBS_ik
+
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 from tIGArx.LocalSpline import LocallyConstructedSpline
+from tIGArx.NURBS import NURBSControlMesh
 from tIGArx.solvers import solve_linear_variational_problem
 
 
@@ -34,7 +37,7 @@ def test_bspline_poisson_2d():
     u = ufl.TrialFunction(spline.V)
     v = ufl.TestFunction(spline.V)
 
-    x = spline.get_fe_cp_coordinates()
+    x = spline.get_fe_coordinates()
     soln = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1])
     f = -spline.div(spline.grad(soln))
 
@@ -92,7 +95,7 @@ def test_bspline_poisson_3d():
     u = ufl.TrialFunction(spline.V)
     v = ufl.TestFunction(spline.V)
 
-    x = spline.get_fe_cp_coordinates()
+    x = spline.get_fe_coordinates()
     soln = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]) * ufl.sin(ufl.pi * x[2])
     f = -spline.div(spline.grad(soln))
 
@@ -146,7 +149,7 @@ def test_bspline_poisson_2d_nonlinear():
         spline_mesh, quad_degree=quad_order, dofs_per_cp=1
     )
 
-    x = spline.get_fe_cp_coordinates()
+    x = spline.get_fe_coordinates()
     soln = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1])
     f = -spline.div(spline.grad(soln)) + alpha * soln * soln * soln
 
@@ -178,3 +181,78 @@ def test_bspline_poisson_2d_nonlinear():
     L2_error = np.sqrt(comm.allreduce(L2_error_local, op=MPI.SUM))
 
     assert np.isclose(L2_error, 0.0, atol=3e-7)
+
+
+def test_nurbs_poisson_2d():
+    # Parameter determining level of refinement
+    REF_LEVEL = 6
+    n_new_knots = 2 ** REF_LEVEL  # 32
+
+    # Open knot vectors for a one-Bezier-element bi-unit square.
+    u_knots = [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]
+    v_knots = [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]
+
+    cp_array = np.array(
+        [
+            [[-1.0, -1.0], [0.0, -1.0], [1.0, -1.0]],
+            [[-1.0, 0.0], [0.7, 0.3], [1.0, 0.0]],
+            [[-1.0, 1.0], [0.0, 1.0], [1.0, 1.0]],
+        ]
+    )
+
+    # Create initial mesh
+    ik_nurbs = NURBS_ik([u_knots, v_knots], cp_array)
+
+    h = 2.0 / float(n_new_knots)
+    knot_list = []
+    for i in range(0, n_new_knots - 1):
+        knot_list += [
+            float(i + 1) * h - 1.0,
+        ]
+    new_knots = np.array(knot_list)
+    ik_nurbs.refine(0, new_knots)
+    ik_nurbs.refine(1, new_knots)
+
+    spline_mesh = NURBSControlMesh(ik_nurbs)
+
+    spline = LocallyConstructedSpline.get_from_mesh_and_init(
+        spline_mesh, quad_degree=4, dofs_per_cp=1
+    )
+
+    spline.control_point_funcs[0].name = "FX"
+    spline.control_point_funcs[1].name = "FY"
+    spline.control_point_funcs[2].name = "FZ"
+    spline.control_point_funcs[3].name = "FW"
+
+    u = spline.rationalize(ufl.TrialFunction(spline.V))
+    v = spline.rationalize(ufl.TestFunction(spline.V))
+
+    x = spline.get_fe_coordinates()
+    soln = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1])
+    f = -spline.div(spline.grad(soln))
+
+    a = ufl.inner(spline.grad(u), spline.grad(v)) * spline.dx
+    L = ufl.inner(f, v) * spline.dx
+
+    u_hom = dolfinx.fem.Function(spline.V)
+
+    side_dofs = []
+    scalar_spline = spline_mesh.getScalarSpline()
+    for parametricDirection in [0, 1]:
+        for side in [0, 1]:
+            side_dofs.append(scalar_spline.getSideDofs(parametricDirection, side))
+
+    # Filter for unique dofs
+    side_dofs = np.array(np.unique(np.concatenate(side_dofs)), dtype=np.int32)
+    dofs_values = np.zeros(len(side_dofs), dtype=np.float64)
+    bcs = {"dirichlet": (side_dofs, dofs_values)}
+
+    cp_sol = solve_linear_variational_problem(a, L, scalar_spline, bcs)
+    spline.extract_cp_solution_to_fe(cp_sol, u_hom)
+
+    L2_error_local = dolfinx.fem.assemble_scalar(
+        dolfinx.fem.form(((spline.rationalize(u_hom) - soln) ** 2) * spline.dx))
+    comm = spline.comm
+    L2_error = np.sqrt(comm.allreduce(L2_error_local, op=MPI.SUM))
+
+    assert np.isclose(L2_error, 0.0, atol=1e-4)

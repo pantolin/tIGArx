@@ -65,7 +65,7 @@ def local_poisson():
         v = ufl.TestFunction(spline.V)
 
         # Create a force, f, to manufacture the solution, soln
-        x = spline.get_fe_cp_coordinates()
+        x = spline.get_fe_coordinates()
         soln = ufl.sin(ufl.pi * (x[0] - x0) / Lx) * \
             ufl.sin(ufl.pi * (x[1] - y0) / Ly)
         f = -spline.div(spline.grad(soln))

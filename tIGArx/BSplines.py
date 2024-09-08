@@ -594,6 +594,8 @@ def dof2ijk(dof, M, N):
 
 # Use BSpline1 instances to store info about each dimension.  No point in going
 # higher than 3, since FEniCS only generates meshes up to dimension 3...
+# -> Suggestion: dimensions 1, 2, and 3 are sufficiently different that they
+# should probably be implemented as separate classes.
 class BSpline(AbstractScalarBasis):
     """
     Class implementing the ``AbstractScalarBasis`` interface, to represent
@@ -617,16 +619,17 @@ class BSpline(AbstractScalarBasis):
             print("ERROR: Unsupported parametric dimension.")
             exit()
 
-        # # If the degrees are not equal, local extraction is not possible
-        # if len(set(degrees)) > 1:
-        #     print("ERROR: Local extraction is not possible with unequal degrees.")
-        #     exit()
-
         self.splines: list[BSpline1] = []
         for i in range(0, self.nvar):
             self.splines += [
                 BSpline1(degrees[i], kvecs[i]),
             ]
+
+        # TODO - remove this constraint and enable periodic splines
+        for s in self.splines:
+            if s.multiplicities[0] != s.multiplicities[-1] != s.p + 1:
+                print("ERROR: Only open knot vectors are supported.")
+                exit()
 
         self.overRefine = overRefine
         self.ncp = self.computeNcp()
@@ -663,6 +666,7 @@ class BSpline(AbstractScalarBasis):
             # TODO: find a way to automatically ignore those extra nearly-zero
             # basis functions.
             # totalFuncs *= (spline.p+1 +2)
+            # TODO: Shouldn't the pessimistic estimate be 2*p+1 per spline?
             totalFuncs *= spline.p + 1
         return totalFuncs
 

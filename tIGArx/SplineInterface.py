@@ -251,3 +251,35 @@ class AbstractControlMesh(object):
         Returns the dimension of physical space.
         """
         pass
+
+    def getDofsByLocation(self, check_func) -> np.ndarray:
+        """
+        Returns a list of degrees of freedom corresponding to control points
+        located in the subdomain defined by the function ``check_func``.
+
+        Args:
+            check_func: A function that takes a point in physical space and
+                a boolean checking if it is on the boundary, and returns a
+                boolean indicating whether the point is in the subdomain.
+
+        Returns:
+            A numpy array of control points for which the function is true.
+        """
+        # this is prior to the permutation
+        nsd = self.getNsd()
+        # since this checks every single control point, it needs to
+        # be scalable
+        p = np.zeros(nsd + 1)
+        zero_dofs = []
+        for I in np.arange(self.getScalarSpline().getNcp()):
+            for j in np.arange(0, nsd + 1):
+                p[j] = self.getHomogeneousCoordinate(I, j)
+            for j in np.arange(0, nsd):
+                p[j] /= p[nsd]
+            # make it strictly based on location, regardless of how the
+            # on_boundary argument is handled
+            is_inside = check_func(p[0:nsd], False) or check_func(p[0:nsd], True)
+            if is_inside:
+                zero_dofs.append(I)
+
+        return np.array(zero_dofs, dtype=np.int32)

@@ -241,7 +241,7 @@ class RhinoTSplineScalarBasis(AbstractScalarBasis):
         return operator_arr
 
     def getElement(self, xi):
-        pass
+        return int(xi[0] / 3.0 + 0.1)
 
     def getCSRPrealloc(self, block_size=1) -> tuple[np.ndarray, np.ndarray]:
         cells = np.arange(len(self.extractionNodes), dtype=np.int32)

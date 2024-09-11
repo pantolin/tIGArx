@@ -134,24 +134,23 @@ class AbstractScalarBasis(object):
         pass
 
     @abc.abstractmethod
-    def getNumLocalDofs(self, block_size=1) -> nb.typed.List[int]:
+    def getNumLocalDofs(self, block_size=1) -> np.ndarray:
         """
         Returns the number of local degrees of freedom for this basis. It
         should not be confused with the number of local dofs in the
         Lagrange basis, it can be lower than that. It is a list because
         it turns out that in some cases, the number of local dofs can vary
         depending on the cell. If the number of local dofs is constant, then
-        the list should contain only one element. Numba typed lists are used
-        because Python lists will be deprecated in the future (0.60.0 now).
+        the list should contain only one element.
 
         Args:
             block_size: The number of values associated with each
                 degree of freedom.
 
         Returns:
-            A list of integers, the number of local degrees of freedom
-            for each cell. If there is only one element in the list, then
-            the number of local dofs is constant.
+            A numpy array containing the number of local degrees of freedom
+            for each cell. If the number of local dofs is constant, then the
+            array will contain only one element.
         """
         pass
 

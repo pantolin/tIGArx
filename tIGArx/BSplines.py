@@ -864,11 +864,11 @@ class BSpline(AbstractScalarBasis):
             deg = max(deg, self.splines[i].p)
         return deg
 
-    def getNumLocalDofs(self, block_size=1) -> list[int]:
+    def getNumLocalDofs(self, block_size=1) -> np.ndarray:
         deg = 1
         for i in range(0, self.nvar):
             deg *= self.splines[i].p + 1
-        return nb.typed.List([deg * block_size])
+        return np.array([deg * block_size])
 
     def getElement(self, xi):
         """

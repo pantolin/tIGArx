@@ -253,10 +253,10 @@ class RhinoTSplineScalarBasis(AbstractScalarBasis):
 
         return get_csr_pre_allocation(cells, dofmap, dimension, max_dofs_per_row)
 
-    def getNumLocalDofs(self, block_size=1) -> list[int]:
-        num_dofs = nb.typed.List()
+    def getNumLocalDofs(self, block_size=1) -> np.ndarray:
+        num_dofs = np.zeros(self.nelBez, dtype=np.int32)
         for i in range(self.nelBez):
-            num_dofs.append(len(self.extractionNodes[i]) * block_size)
+            num_dofs[i] = len(self.extractionNodes[i]) * block_size
 
         return num_dofs
 

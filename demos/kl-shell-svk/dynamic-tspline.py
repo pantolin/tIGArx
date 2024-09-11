@@ -40,7 +40,6 @@ import ufl
 from dolfinx import default_real_type
 
 from tIGArx.common import mpirank
-from tIGArx.solvers import solve_linear_variational_problem
 from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
 from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
 

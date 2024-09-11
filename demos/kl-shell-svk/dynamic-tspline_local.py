@@ -5,16 +5,12 @@ import dolfinx
 import ufl
 
 from dolfinx import default_real_type
-from numpy import dtype
 
 from tIGArx.LocalSpline import LocallyConstructedSpline
 from tIGArx.common import mpirank
-from tIGArx.solvers import solve_linear_variational_problem
 from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
 from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
 from tIGArx.timing_util import perf_log
 from tIGArx.utils import interleave_and_expand
 
@@ -256,7 +252,7 @@ def dynamic_t_spline_local():
                 "------- Time step " + str(i + 1) +
                 " , t = " + str(timeInt.t) + " -------"
             )
-
+        perf_log.start_timing("Time for step " + str(i + 1))
         # Solve the nonlinear problem for this time step and put the solution
         # (in homogeneous coordinates) in y_hom.
         spline.solve_nonlinear_variational_problem(dRes, res, y_hom, bcs, rtol=1e-7)
@@ -266,6 +262,8 @@ def dynamic_t_spline_local():
 
         # Advance to the next time step.
         timeInt.advance()
+
+        perf_log.end_timing("Time for step " + str(i + 1))
 
     vtx.close()
 

@@ -329,7 +329,7 @@ def _assemble_matrix(
         coords: np.ndarray,
         dofmap: np.ndarray | nb.typed.List[np.ndarray],
         lagrange_loc_dofs: int,
-        spline_loc_dofs: nb.typed.List[int],
+        spline_loc_dofs: np.ndarray,
         coeffs: np.ndarray,
         consts: np.ndarray,
         cells: np.ndarray,
@@ -404,7 +404,7 @@ def _assemble_vector(
         coords: np.ndarray,
         dofmap: np.ndarray | nb.typed.List[np.ndarray],
         lagrange_loc_dofs: int,
-        spline_loc_dofs: nb.typed.List[int],
+        spline_loc_dofs: np.ndarray,
         coeffs: np.ndarray,
         consts: np.ndarray,
         cells: np.ndarray,
@@ -469,7 +469,7 @@ def _assemble_vector(
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _extract_control_points(
         cells: np.ndarray,
-        spline_dofmap: np.ndarray | nb.typed.List[np.ndarray],
+        spline_dofmap: np.ndarray,
         extraction_dofmap: np.ndarray,
         extraction_operators: nb.typed.List[np.ndarray],
         is_tensor_product: bool,

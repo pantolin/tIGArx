@@ -13,10 +13,14 @@ from tIGArx.SplineInterface import AbstractScalarBasis
 from tIGArx.timing_util import perf_log
 from tIGArx.utils import interleave_and_expand, get_lagrange_permutation
 
+# Initialization of the FFI interface required to call PETSc functions
+# from inside numba JIT-compiled functions
 ffi = FFI()
 
 petsc_lib = dolfinx.fem.petsc.load_petsc_lib(ctypes.cdll.LoadLibrary)
 
+# The functions exist in the lib but their signatures are not exposed
+# so we have to define them manually
 set_mat = getattr(petsc_lib, "MatSetValuesLocal")
 set_vec = getattr(petsc_lib, "VecSetValuesLocal")
 
@@ -48,7 +52,8 @@ def assemble_matrix(
         profile=False
 ) -> PETSc.Mat:
     """
-    Assemble matrix
+    Assemble the matrix from a given form. Allocates the matrix if it is not
+    provided. Returns the assembled matrix.
 
     Args:
         form (dolfinx.fem.Form): form to assemble
@@ -84,6 +89,8 @@ def assemble_matrix(
 
 
     assembly_kernel(form, spline, mat, profile)
+    mat.assemble()
+
     return mat
 
 
@@ -94,7 +101,8 @@ def assemble_vector(
         profile=False
 ) -> PETSc.Vec:
     """
-    Assemble matrix
+    Assemble the vector from a given form. Allocates the vector if it is not
+    provided. Returns the assembled vector.
 
     Args:
         form (dolfinx.fem.Form): form to assemble
@@ -121,6 +129,8 @@ def assemble_vector(
         vec.zeroEntries()
 
     assembly_kernel(form, spline, vec, profile)
+    vec.assemble()
+
     return vec
 
 
@@ -139,23 +149,19 @@ def assembly_kernel(
         tensor (PETSc.Mat | PETSc.Vec): matrix or vector to assemble into
         profile (bool, optional): Flag to enable profiling information.
             Default is False.
-
-    Returns:
-        PETSc.Mat | PETSc.Vec: The assembled matrix or vector
     """
     if profile:
         perf_log.start_timing(f"Assembling rank-{form.rank} form", True)
         perf_log.start_timing("Getting basic data")
 
-    vertices, coords, gdim = get_vertices(form.mesh)
+    coords = form.mesh.geometry.x
+    gdim = form.mesh.geometry.dim
 
-    cells = np.arange(form.mesh.topology.original_cell_index.size, dtype=np.int32)
+    num_cells = form.mesh.topology.index_map(form.mesh.topology.dim).size_local
+    vertices = form.mesh.geometry.dofmap.reshape(num_cells, -1)
+
+    cells = np.arange(num_cells, dtype=np.int32)
     bs = form.function_spaces[0].dofmap.index_map_bs
-    # This is to ensure that the get_full_operator function works correctly.
-    # Examples with fewer than 4 cells will not work, because at least
-    # 4 cells are needed to correctly assess the regime of the extraction
-    # (i.e. at least one operator per cell).
-    assert cells.shape[0] > 3
 
     spline_loc_dofs = spline.getNumLocalDofs(block_size=bs)
     lagrange_loc_dofs = bs * (spline.getDegree() + 1) ** gdim
@@ -184,6 +190,8 @@ def assembly_kernel(
         perf_log.start_timing("Computing extraction operators")
 
     extraction_operators = spline.get_lagrange_extraction_operators()
+    tensor_product = spline.is_tensor_product_basis()
+
     perm = get_lagrange_permutation(
         form.function_spaces[0].element.basix_element.points, spline.getDegree(), gdim
     )
@@ -218,10 +226,10 @@ def assembly_kernel(
                     cells,
                     extraction_operators,
                     extraction_dofmap,
+                    tensor_product,
                     permutation,
                     bs,
-                    set_mat,
-                    PETSc.InsertMode.ADD_VALUES
+                    set_mat
                 )
 
             elif form.rank == 1:
@@ -238,10 +246,10 @@ def assembly_kernel(
                     cells,
                     extraction_operators,
                     extraction_dofmap,
+                    tensor_product,
                     permutation,
                     bs,
-                    set_vec,
-                    PETSc.InsertMode.ADD_VALUES
+                    set_vec
                 )
 
             if profile:
@@ -251,66 +259,94 @@ def assembly_kernel(
         perf_log.end_timing("Assembly step")
         perf_log.end_timing(f"Assembling rank-{form.rank} form")
 
-    if form.rank == 2 or form.rank == 1:
-        tensor.assemble()
-
-    return tensor
-
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def get_full_operator(operators, bs, element):
-    if len(operators) == 1:
-        return np.kron(
-            operators[0][element], np.eye(bs, dtype=PETSc.ScalarType)
-        )
-    elif len(operators) == 2:
-        j = element // operators[0].shape[0]
-        i = element % operators[0].shape[0]
+def _get_full_operator(
+        operators: list[np.ndarray],
+        bs: int,
+        element: int,
+        is_tensor_product: bool = False
+) -> np.ndarray:
+    """
+    Assembles the full extraction matrix for a specified element. If the
+    operators are tensor product, then the full operator is assembled by
+    taking the Kronecker product of the operators. Otherwise, the operator
+    is simply the operator corresponding to the element with a small hack
+    that each operator is a 3D array with a single element in the first
+    dimension.
 
-        return np.kron(
-            np.kron(
-                operators[1][j],
-                operators[0][i]
-            ),
-            np.eye(bs, dtype=PETSc.ScalarType)
-        )
-    elif len(operators) == 3:
-        k = element // (operators[0].shape[0] * operators[1].shape[0])
-        j = (element // operators[0].shape[0]) % operators[1].shape[0]
-        i = element % operators[0].shape[0]
+    WARNING: numba will probably drop list support.
 
-        return np.kron(
-            np.kron(
+    Args:
+        operators (list[np.ndarray]): list of operators
+        bs (int): block size
+        element (int): element index
+        is_tensor_product (bool, optional): flag to indicate if the operators
+            are tensor product. Default is False.
+
+    Returns:
+        np.ndarray: full extraction matrix with the correct block size
+    """
+    if is_tensor_product:
+        if len(operators) == 1:
+            return np.kron(
+                operators[0][element], np.eye(bs, dtype=PETSc.ScalarType)
+            )
+        elif len(operators) == 2:
+            j = element // operators[0].shape[0]
+            i = element % operators[0].shape[0]
+
+            return np.kron(
                 np.kron(
-                    operators[2][k],
-                    operators[1][j]
+                    operators[1][j],
+                    operators[0][i]
                 ),
-                operators[0][i]
-            ),
-            np.eye(bs, dtype=PETSc.ScalarType)
-        )
+                np.eye(bs, dtype=PETSc.ScalarType)
+            )
+        elif len(operators) == 3:
+            k = element // (operators[0].shape[0] * operators[1].shape[0])
+            j = (element // operators[0].shape[0]) % operators[1].shape[0]
+            i = element % operators[0].shape[0]
+
+            return np.kron(
+                np.kron(
+                    np.kron(
+                        operators[2][k],
+                        operators[1][j]
+                    ),
+                    operators[0][i]
+                ),
+                np.eye(bs, dtype=PETSc.ScalarType)
+            )
     else:
         return np.kron(operators[element][0], np.eye(bs, dtype=PETSc.ScalarType))
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _assemble_matrix(
-        mat_handle,
-        kernel,
-        vertices,
-        coords,
-        dofmap,
-        lagrange_loc_dofs,
-        spline_loc_dofs,
-        coeffs,
-        consts,
-        cells,
-        operators,
-        extraction_dofmap,
-        permutation,
-        bs,
-        set_vals,
-        mode
+        mat_handle: int,
+        kernel: callable,
+        vertices: np.ndarray,
+        coords: np.ndarray,
+        dofmap: np.ndarray,
+        lagrange_loc_dofs: int,
+        spline_loc_dofs: list[int],
+        coeffs: np.ndarray,
+        consts: np.ndarray,
+        cells: np.ndarray,
+        operators: list[np.ndarray],
+        extraction_dofmap: np.ndarray,
+        is_tensor_product: bool,
+        permutation: np.ndarray,
+        bs: int,
+        set_vals: callable,
+        mode: int = PETSc.InsertMode.ADD_VALUES
 ):
+    """
+    Matrix assembly kernel, inspired by the one presented in the DOLFINx
+    paper. The list of arguments is a bit extensive to cover, so it is
+    omitted here. The kernel is called for all cells which are passed in.
+    Note that the handle of the matrix is passed in.
+    """
     # Initialize
     num_loc_vertices = vertices.shape[1]
     cell_coords = np.zeros((num_loc_vertices, 3))
@@ -324,8 +360,9 @@ def _assemble_matrix(
     )
 
     for cell in cells:
+        # Assembling the full extraction operator
         element = extraction_dofmap[cell]
-        full_kron = get_full_operator(operators, bs, element)
+        full_kron = _get_full_operator(operators, bs, element, is_tensor_product)
 
         cell_coords[:, :] = coords[vertices[cell, :]]
         lagrange_local.fill(0.0)
@@ -339,15 +376,15 @@ def _assemble_matrix(
             ffi.from_buffer(perm),
         )
 
-        # Permute the rows and columns so that they match the
-        # indexing of the spline basis
+        # Permute rows and columns for index matching
         lagrange_local[:, :] = lagrange_local[permutation, :][:, permutation]
         spline_local = full_kron @ lagrange_local @ full_kron.T
 
+        # If the number of dofs is constant, the first element contains it
         pos = dofmap[cell]
-        n_dofs = spline_loc_dofs[0] if len(spline_loc_dofs) == 1 else spline_loc_dofs[cell]
+        n_dofs = spline_loc_dofs[0 if len(spline_loc_dofs) == 1 else cell]
 
-        # mat_handle.setValues(pos, pos, spline_local, PETSc.InsertMode.ADD_VALUES)
+        # PETSc insertion method, mode has to be a variable
         set_vals(
             mat_handle,
             n_dofs,
@@ -361,23 +398,30 @@ def _assemble_matrix(
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _assemble_vector(
-        vec,
-        kernel,
-        vertices,
-        coords,
-        dofmap,
-        lagrange_loc_dofs,
-        spline_loc_dofs,
-        coeffs,
-        consts,
-        cells,
-        operators,
-        extraction_dofmap,
-        permutation,
-        bs,
-        set_vals,
-        mode
+        vec_handle: int,
+        kernel: callable,
+        vertices: np.ndarray,
+        coords: np.ndarray,
+        dofmap: np.ndarray,
+        lagrange_loc_dofs: int,
+        spline_loc_dofs: list[int],
+        coeffs: np.ndarray,
+        consts: np.ndarray,
+        cells: np.ndarray,
+        operators: list[np.ndarray],
+        extraction_dofmap: np.ndarray,
+        is_tensor_product: bool,
+        permutation: np.ndarray,
+        bs: int,
+        set_vals: callable,
+        mode: int = PETSc.InsertMode.ADD_VALUES
 ):
+    """
+    Vector assembly kernel, inspired by the one presented in the DOLFINx
+    paper. The list of arguments is a bit extensive to cover, so it is
+    omitted here. The kernel is called for all cells which are passed in.
+    Note that a handle to the vector is passed in.
+    """
     # Initialize
     num_loc_vertices = vertices.shape[1]
     cell_coords = np.zeros((num_loc_vertices, 3))
@@ -390,8 +434,9 @@ def _assemble_vector(
     lagrange_local = np.zeros(lagrange_loc_dofs, dtype=PETSc.ScalarType)
 
     for cell in cells:
+        # Assembling the full extraction operator
         element = extraction_dofmap[cell]
-        full_kron = get_full_operator(operators, bs, element)
+        full_kron = _get_full_operator(operators, bs, element, is_tensor_product)
 
         cell_coords[:, :] = coords[vertices[cell, :]]
         lagrange_local.fill(0.0)
@@ -407,11 +452,13 @@ def _assemble_vector(
 
         spline_local = full_kron @ lagrange_local[permutation]
 
+        # If the number of dofs is constant, the first element contains it
         pos = dofmap[cell]
-        n_dofs = spline_loc_dofs[0] if len(spline_loc_dofs) == 1 else spline_loc_dofs[cell]
+        n_dofs = spline_loc_dofs[0 if len(spline_loc_dofs) == 1 else cell]
 
+        # PETSc insertion method, mode has to be a variable
         set_vals(
-            vec,
+            vec_handle,
             n_dofs,
             pos.ctypes,
             spline_local.ctypes,
@@ -421,41 +468,52 @@ def _assemble_vector(
 
 @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def _extract_control_points(
-        cells,
-        spline_dofmap,
-        extraction_dofmap,
+        cells: np.ndarray,
+        spline_dofmap: np.ndarray,
+        extraction_dofmap: np.ndarray,
         extraction_operators,
-        fe_dofmap,
-        permutation,
-        control_points,
-        extracted_control_points,
+        is_tensor_product: bool,
+        fe_dofmap: np.ndarray,
+        permutation: np.ndarray,
+        control_points: np.ndarray,
+        extracted_control_points: np.ndarray
 ):
-    for cell in cells:
-        element = extraction_dofmap[cell]
-        full_operator = get_full_operator(extraction_operators, 1, element)
+    """
+    This function extracts the control points from the spline basis to the
+    Lagrange basis. It should be noted that for this function to work as
+    intended one extra column is required in the control_points array.
+    This column is used to store how many times a control point was repeatedly
+    added to the global control point array.
+    In the end one divides through the number of times a control point was
+    added to get the correct control point values, but this is not part of
+    this function!
 
+    Args:
+        cells (np.ndarray): cell indices for which to extract control points
+        spline_dofmap (np.ndarray): spline dofmap
+        extraction_dofmap (np.ndarray): extraction dofmap
+        extraction_operators (list[np.ndarray]): extraction operators
+        is_tensor_product (bool): flag to indicate if the operators
+            are tensor product
+        fe_dofmap (np.ndarray): finite element dofmap
+        permutation (np.ndarray): permutation array
+        control_points (np.ndarray): control points to extract from, the
+            result is stored here, shape is (#cps, dim + 1)
+        extracted_control_points (np.ndarray): extracted control points, the
+            result is stored here, shape is (#extracted_cps, dim + 1)
+    """
+    for cell in cells:
+        # Assembling the full extraction operator
+        element = extraction_dofmap[cell]
+        full_operator = _get_full_operator(
+            extraction_operators, 1, element, is_tensor_product
+        )
+
+        # Determining corresponding local dof ranges
         local_cp_range = spline_dofmap[cell]
         local_fe_range = fe_dofmap[cell][permutation]
 
+        # Simple insertion because of numpy
         extracted_control_points[local_fe_range, :] += (
             full_operator.T @ (control_points[local_cp_range, :])
         )
-
-
-def get_vertices(mesh: dolfinx.mesh.Mesh):
-    """
-    Get mesh vertices
-
-    Args:
-        mesh (dolfinx.mesh.Mesh): mesh object
-    Returns:
-        vertices (np.array(np.int32)): vertices associated to each cell
-        coords (np.array): mesh coordinates
-        gdim (np.int32): mesh dimension
-    """
-    coords = mesh.geometry.x
-    gdim = mesh.geometry.dim
-    num_cells = mesh.topology.index_map(mesh.topology.dim).size_local
-    vertices = mesh.geometry.dofmap.reshape(num_cells, -1)
-
-    return vertices, coords, gdim

@@ -601,7 +601,6 @@ class BSpline(AbstractScalarBasis):
     Class implementing the ``AbstractScalarBasis`` interface, to represent
     a uni-, bi-, or tri-variate B-spline.
     """
-
     def __init__(self, degrees, kvecs, overRefine=0):
         """
         Create a ``BSpline`` with degrees in each direction given by the
@@ -669,6 +668,9 @@ class BSpline(AbstractScalarBasis):
             # TODO: Shouldn't the pessimistic estimate be 2*p+1 per spline?
             totalFuncs *= spline.p + 1
         return totalFuncs
+
+    def is_tensor_product_basis(self) -> bool:
+        return True
 
     def getNodesAndEvals(self, xi):
 

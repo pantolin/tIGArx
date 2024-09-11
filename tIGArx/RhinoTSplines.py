@@ -167,6 +167,9 @@ class RhinoTSplineScalarBasis(AbstractScalarBasis):
     def getPrealloc(self):
         return self.maxNshl
 
+    def is_tensor_product_basis(self) -> bool:
+        return False
+
     def needsDG(self):
         return False
 

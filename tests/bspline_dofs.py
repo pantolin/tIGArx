@@ -1,8 +1,7 @@
 import numpy as np
-import numba as nb
 
 from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.utils import interleave_and_expand
+from tIGArx.utils import interleave_and_expand, get_csr_pre_allocation
 
 
 def reference_dofs_1d(n_u, p, scalar_spline, bs=1):
@@ -41,42 +40,6 @@ def reference_dofs_3d(n_u, n_v, n_w, p, q, r, scalar_spline, bs=1):
                 )
 
     return ref_dofs
-
-
-@nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def get_csr_pre_allocation(cells, dofmap, rows, max_dofs_per_row):
-    dofs_per_row = np.zeros((rows, max_dofs_per_row), dtype=np.int32)
-    nnz_per_row = np.zeros(rows, dtype=np.int32)
-
-    for cell in cells:
-        for row_idx in dofmap[cell, :]:
-            for dof in dofmap[cell, :]:
-                found = False
-                # Linear search is used here because maintaining a sorted
-                # array is expected to be expensive
-                for i in range(nnz_per_row[row_idx]):
-                    if dofs_per_row[row_idx, i] == dof:
-                        found = True
-                        break
-                if not found:
-                    dofs_per_row[row_idx, nnz_per_row[row_idx]] = dof
-                    nnz_per_row[row_idx] += 1
-
-    index_ptr = np.zeros(rows + 1, dtype=np.int32)
-    for i in range(rows):
-        index_ptr[i + 1] = index_ptr[i] + nnz_per_row[i]
-
-    indices = np.zeros(index_ptr[-1], dtype=np.int32)
-
-    index = 0
-    for row, row_dofs in enumerate(dofs_per_row):
-        sorted_dofs = np.sort(row_dofs[:nnz_per_row[row]])
-
-        for i in range(nnz_per_row[row]):
-            indices[index] = sorted_dofs[i]
-            index += 1
-
-    return index_ptr, indices
 
 
 def get_extraction_ordering(cells, vertices, coords, spline, gdim=2):

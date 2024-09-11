@@ -8,12 +8,15 @@ from petsc4py import PETSc
 from tIGArx.LocalAssembly import _extract_control_points, assemble_vector, \
     assemble_matrix
 from tIGArx.SplineInterface import AbstractControlMesh
+
 from tIGArx.calculusUtils import getMetric, mappedNormal, tIGArxMeasure, volumeJacobian, \
     surfaceJacobian, pinvD, getChristoffel, cartesianGrad, cartesianDiv, cartesianCurl, \
     CurvilinearTensor, curvilinearGrad, curvilinearDiv
+
 from tIGArx.common import selfcomm
 from tIGArx.solvers import solve_linear_variational_problem, ksp_solve_iteratively, \
     apply_bcs, options
+
 from tIGArx.timing_util import perf_log
 from tIGArx.utils import createFunctionSpace, get_lagrange_permutation, \
     createElementType, createVectorElementType, create_permuted_element
@@ -27,6 +30,12 @@ class LocallyConstructedSpline:
             quad_degree=2,
             dofs_per_cp=1
     ):
+        """
+        Creates tbe necessary objects for working with a spline in the finite
+        element space. However, it does not initialize the control points or any
+        other data. This is done by calling the appropriate methods to keep the
+        constructor lightweight.
+        """
         self.spline_mesh: AbstractControlMesh = mesh
         self.comm = comm
         self.quad_degree = quad_degree
@@ -77,6 +86,15 @@ class LocallyConstructedSpline:
             quad_degree=2,
             dofs_per_cp=1
     ):
+        """
+        Follows in the footsteps of FEniCSx methods which have separate
+        functions for creating an object from a function instead of
+        the constructor. In this twist, it is from a static method, since
+        one could in principle create the object from a different source
+        (like reading from a file).
+        The constructor does not perform any initialization, so this method
+        is necessary to ensure that
+        """
         spline = LocallyConstructedSpline(mesh, comm, quad_degree, dofs_per_cp)
 
         spline.init_control_points()
@@ -96,7 +114,6 @@ class LocallyConstructedSpline:
         Initialize the control points of the spline by extracting the values
         from the control point functions.
         """
-
         self.extracted_control_points = (
             self.extract_values_to_fe_cps(self.control_points)
         )
@@ -111,6 +128,12 @@ class LocallyConstructedSpline:
         self.control_point_funcs[-1].x.array[:size] = np.ones(size)
 
     def init_ufl_symbols(self):
+        """
+        Initialize the UFL symbols for the finite element space. This is
+        necessary to enable using the UFL language for defining variational
+        forms with spline functions, while in fact using the finite element
+        space.
+        """
         tag = 0
         face_dim = self.mesh.topology.dim - 1
         all_facets = np.arange(*self.mesh.topology.index_map(face_dim).local_range)
@@ -156,7 +179,22 @@ class LocallyConstructedSpline:
 
     def extract_values_to_fe_cps(self, values: np.ndarray) -> np.ndarray:
         """
-        Extract the values to the control points of the finite element space.
+        Extract the values to the control points of the finite element space,
+        the backend implementation. This function assumes that the number of
+        values matches the number of control points. An additional column of
+        ones is added to the values to account for possible multiple extraction
+        of the same control point which occurs when the extraction matrix is
+        transposed.
+
+        Args:
+            values (np.ndarray): values to extract to the control points,
+                shape (n, m) where n is the number of control points and m is
+                the number of values per control point.
+
+        Returns:
+            np.ndarray: extracted values at the control points, shape (N, m)
+                where N is the number of control points in the finite element
+                space.
         """
         # The number of values must match the number of control points.
         assert values.shape[0] == self.control_points.shape[0]
@@ -176,6 +214,7 @@ class LocallyConstructedSpline:
         extraction_dofmap = scalar_spline.getExtractionOrdering(self.mesh)
         spline_dofmap = scalar_spline.getCpDofmap(extraction_dofmap)
         extraction_operators = scalar_spline.get_lagrange_extraction_operators()
+        tensor_basis = scalar_spline.is_tensor_product_basis()
 
         extracted_values = np.zeros(
             (self.control_space.dofmap.index_map.size_local, values.shape[1]),
@@ -193,12 +232,15 @@ class LocallyConstructedSpline:
             spline_dofmap,
             extraction_dofmap,
             extraction_operators,
+            tensor_basis,
             fe_dofmap,
             perm,
             values,
             extracted_values,
         )
 
+        # Normalize the extracted values by the last column to prevent
+        # multiple counting of the same control point.
         extracted_values[:, :-1] /= extracted_values[:, -1][:, np.newaxis]
 
         return extracted_values[:, :-1]
@@ -206,6 +248,10 @@ class LocallyConstructedSpline:
     def extract_cp_solution_to_fe(self, cp_sol: PETSc.Vec, fe_sol: dolfinx.fem.Function):
         """
         Extract the solution at the control points to the finite element space.
+
+        Args:
+            cp_sol (PETSc.Vec): solution at the control points
+            fe_sol (dolfinx.fem.Function): finite element solution
         """
         sol = self.extract_values_to_fe_cps(
             cp_sol.array_r.reshape(-1, self.dofs_per_cp)
@@ -311,6 +357,8 @@ class LocallyConstructedSpline:
     ) -> dolfinx.fem.Function:
         """
         Project a UFL expression to the finite element space.
+
+        # TODO: Check this, I mostly just copied it from the original code.
         """
         u = ufl.TrialFunction(self.V)
         v = ufl.TestFunction(self.V)

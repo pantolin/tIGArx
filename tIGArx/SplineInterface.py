@@ -30,6 +30,10 @@ class AbstractScalarBasis(object):
 
         Args:
             xi: A numpy array of parametric points.
+
+        Returns:
+            A list of lists, where each sublist contains the index of the
+            basis function and its evaluation at the point.
         """
         return
 
@@ -49,24 +53,40 @@ class AbstractScalarBasis(object):
     @abc.abstractmethod
     def getNcp(self):
         """
-        Returns the total number of basis functions.
+        Returns the total number of basis functions / control points.
         """
-        return
+        pass
 
     @abc.abstractmethod
-    def getElement(self, xi):
+    def is_tensor_product_basis(self) -> bool:
         """
-        Given a parametric point ``xi``, return the element of the basis
-        function that is nonzero at that point.
+        Returns a boolean indicating whether the basis is tensor product.
+        This is necessary for assembling extraction operators in a
+        tensor-product fashion, which is more memory efficient.
         """
-        return
+        pass
+
+    @abc.abstractmethod
+    def getElement(self, xi: np.ndarray) -> int:
+        """
+        Given a parametric point ``xi``, return the parametric element
+        containing that point.
+
+        Args:
+            xi: numpy array of shape (3,) containing the coordinates of
+                the point in the parametric domain.
+
+        Returns:
+            The index of the element containing the point.
+        """
+        pass
 
     @abc.abstractmethod
     def getCpDofmap(self, cells: np.ndarray | None = None, block_size=1) -> np.ndarray:
         """
         Returns a numpy array of control point degrees of freedom associated
         with the given cells. If ``cells`` is None, then all control points
-        are returned in the Kronecker product order. If a particular order is
+        are returned in the tensor product order. If a particular order is
         needed, then the ``cells`` argument should be used.
 
         Args:
@@ -107,7 +127,7 @@ class AbstractScalarBasis(object):
         pass
 
     @abc.abstractmethod
-    def getNumLocalDofs(self, block_size=1) -> np.ndarray:
+    def getNumLocalDofs(self, block_size=1) -> list[int]:
         """
         Returns the number of local degrees of freedom for this basis. It
         should not be confused with the number of local dofs in the
@@ -115,24 +135,17 @@ class AbstractScalarBasis(object):
         it turns out that in some cases, the number of local dofs can vary
         depending on the cell. If the number of local dofs is constant, then
         the list should contain only one element.
+
+        Args:
+            block_size: The number of values associated with each
+                degree of freedom.
+
+        Returns:
+            A list of integers, the number of local degrees of freedom
+            for each cell. If there is only one element in the list, then
+            the number of local dofs is constant.
         """
         pass
-
-    def getAllNodesAndEvals(self, xi_arr):
-        """
-        Given a numpy array of parametric points ``xi``, return two numpy
-        2D tensors, one of indices and one of evaluations, such that
-        ``indices[i,j]`` is the index of the ``j``-th basis function
-        evaluated at the ``i``-th point, and ``evals[i,j]`` is the
-        corresponding evaluation.
-        """
-        # Here is a dirty implementation, as straightforward as possible.
-
-        nodes_and_evals_list = [self.getNodesAndEvals(xi) for xi in xi_arr]
-
-        np_arr = np.array(nodes_and_evals_list)
-
-        return np.array(np_arr[:, :, 0], dtype=np.int32), np_arr[:, :, 1]
 
     @abc.abstractmethod
     def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
@@ -204,7 +217,8 @@ class AbstractScalarBasis(object):
         be exact for the CSR matrix.
 
         Args:
-            block_size: The number of values associated with each degree of freedom.
+            block_size: The number of values associated with each
+                degree of freedom.
 
         Returns:
             A pair of numpy arrays, the first of which is the index pointer

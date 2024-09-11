@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import abc
 
-import dolfinx
 import numpy as np
+import numba as nb
+
+import dolfinx
 
 from tIGArx.common import worldcomm, DEFAULT_PREALLOC
 
@@ -82,7 +84,11 @@ class AbstractScalarBasis(object):
         pass
 
     @abc.abstractmethod
-    def getCpDofmap(self, cells: np.ndarray | None = None, block_size=1) -> np.ndarray:
+    def getCpDofmap(
+            self,
+            cells: np.ndarray | None = None,
+            block_size=1
+    ) -> np.ndarray | nb.typed.List[np.ndarray]:
         """
         Returns a numpy array of control point degrees of freedom associated
         with the given cells. If ``cells`` is None, then all control points
@@ -94,7 +100,8 @@ class AbstractScalarBasis(object):
             block_size: The number of values associated with each control point.
 
         Returns:
-            A numpy array of control point degrees of freedom.
+            A numpy array or numba typed list of numpy arrays, where each
+            array contains the degrees of freedom for a control point.
         """
         pass
 
@@ -127,14 +134,15 @@ class AbstractScalarBasis(object):
         pass
 
     @abc.abstractmethod
-    def getNumLocalDofs(self, block_size=1) -> list[int]:
+    def getNumLocalDofs(self, block_size=1) -> nb.typed.List[int]:
         """
         Returns the number of local degrees of freedom for this basis. It
         should not be confused with the number of local dofs in the
         Lagrange basis, it can be lower than that. It is a list because
         it turns out that in some cases, the number of local dofs can vary
         depending on the cell. If the number of local dofs is constant, then
-        the list should contain only one element.
+        the list should contain only one element. Numba typed lists are used
+        because Python lists will be deprecated in the future (0.60.0 now).
 
         Args:
             block_size: The number of values associated with each
@@ -148,7 +156,7 @@ class AbstractScalarBasis(object):
         pass
 
     @abc.abstractmethod
-    def get_lagrange_extraction_operators(self) -> list[np.ndarray]:
+    def get_lagrange_extraction_operators(self) -> nb.typed.List[np.ndarray]:
         """
         Returns the extraction operators which are used to map between
         the spline basis and the Lagrange basis. There are tensor
@@ -156,13 +164,13 @@ class AbstractScalarBasis(object):
         that the operators need to be a 3D numpy array, where the first
         index is the cell, the second index is the local dof of the
         Lagrange element, and the third index is the local dof of the
-        spline element. If the number of local dofs is not constant or
+        spline element.
+        If the number of local dofs is not constant or
         the tensor product cannot be exploited, then the list contains
         one operator per list element, but the list elements have to be
         3D numpy arrays as well. The first index is a dummy, only there
-        to facilitate the structure (numba does not support list of lists).
-        The one constraint of this is that one cannot have tensor product
-        elements with a varying number of dofs.
+        to facilitate the structure. Numba typed lists are used because
+        Python lists will be deprecated in the future (0.60.0 now).
         """
         pass
 
@@ -270,6 +278,8 @@ class AbstractControlMesh(object):
         """
         Returns a list of degrees of freedom corresponding to control points
         located in the subdomain defined by the function ``check_func``.
+
+        # TODO: Optimize this method for performance.
 
         Args:
             check_func: A function that takes a point in physical space and

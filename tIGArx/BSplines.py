@@ -12,7 +12,6 @@ import numpy as np
 import numba as nb
 
 import dolfinx
-from cached_property import cached_property
 from dolfinx import default_real_type
 
 from tIGArx.common import INDEX_TYPE, worldcomm
@@ -869,7 +868,7 @@ class BSpline(AbstractScalarBasis):
         deg = 1
         for i in range(0, self.nvar):
             deg *= self.splines[i].p + 1
-        return [deg * block_size]
+        return nb.typed.List([deg * block_size])
 
     def getElement(self, xi):
         """
@@ -1111,8 +1110,8 @@ class BSpline(AbstractScalarBasis):
             u_spline = self.splines[0]
             v_spline = self.splines[1]
 
-            u_inter = u_spline.interacting_basis_functions()
-            v_inter = v_spline.interacting_basis_functions()
+            u_inter = nb.typed.List(u_spline.interacting_basis_functions())
+            v_inter = nb.typed.List(v_spline.interacting_basis_functions())
 
             @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
             def get_interacting_2d(u_inter, v_inter, u_ncp, v_ncp, block_size):
@@ -1162,9 +1161,9 @@ class BSpline(AbstractScalarBasis):
             v_spline = self.splines[1]
             w_spline = self.splines[2]
 
-            u_inter = u_spline.interacting_basis_functions()
-            v_inter = v_spline.interacting_basis_functions()
-            w_inter = w_spline.interacting_basis_functions()
+            u_inter = nb.typed.List(u_spline.interacting_basis_functions())
+            v_inter = nb.typed.List(v_spline.interacting_basis_functions())
+            w_inter = nb.typed.List(w_spline.interacting_basis_functions())
 
             @nb.jit(nopython=True, nogil=True, cache=True, fastmath=True)
             def get_interacting_3d(
@@ -1233,17 +1232,17 @@ class BSpline(AbstractScalarBasis):
 
         return index_ptr, np.concatenate(interacting)
 
-    def get_lagrange_extraction_operators(self) -> list[list[np.ndarray]]:
+    def get_lagrange_extraction_operators(self) -> nb.typed.List[np.ndarray]:
         """
         Returns a list of local Lagrange extraction operators, one for each
         unique knot span.
         """
-        operators = []
+        operators = nb.typed.List()
         order = self.getDegree()
         for i in range(0, self.nvar):
-            operators += [
-                self.splines[i].compute_local_lagrange_extraction_operator(order=order),
-            ]
+            operators.append(
+                self.splines[i].compute_local_lagrange_extraction_operator(order=order)
+            )
         return operators
 
     def computeNel(self):

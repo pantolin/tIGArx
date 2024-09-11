@@ -14,7 +14,7 @@ dependencies:
   - fenics-ufcx=0.7.0
   - fenics-ufl=2023.2.0
   - scipy
-  - numba=0.60.0
+  - numba
   - petsc4py
   - adios2
   - gfortran

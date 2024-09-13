@@ -53,6 +53,10 @@ practice and research.
   is designed to work with just a dofmap and without an appropriate set structure. It 
   can be considered a bottleneck in practice (about half of matrix assembly time for
   complex examples like the bouncing ball)
+- Take a closer look at the bouncing ball example and its convergence properties: the old code 
+  has some weird convergence properties which seem incorrect (converges too quickly or the residual
+  is wrong, which was my conclusion after debugging). I do not think it is down to ordering of DOFs
+  because extracted orderings are the same as the old implementation. 
 - **More mature abstractions**: This is mostly down to perhaps more rigorously prescribing 
   the interfaces and adding a more explicit way for mapping the parametric domain to the
   physical one. This is arguably done with `AbstractControlMesh`, but perhaps some more 
@@ -89,4 +93,10 @@ practice and research.
 - Figure out how iterated div free solve used for Taylor-Green works
 - Add test for Gauss-Legendre quadrature which was fixed from the original one which was 
   limited to go only up to order 4.
+- Generalize Lagrange extraction operators to work thorough an interface and have a default
+  implementation for full operators (tensor product should be treated as an optimization).
+- Remove ijk2dof or document it better: evil function, it has inconsistencies in the way it
+  numbers degrees of freedom and a somewhat weird way of calculating indices. All The functions
+  of this type should either be removed or very clearly documented (their code should be in
+  the comment to prevent constant scrolling to check the signature)
 - Add lifting?

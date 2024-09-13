@@ -413,7 +413,7 @@ class LocallyConstructedSpline:
             profile (bool, optional): Flag to enable profiling information.
                 Default is False.
             rtol (float, optional): relative tolerance for the solver.
-                Default is 1e-12.
+                Default is 1e-10.
 
         Returns:
             bool: flag indicating convergence
@@ -439,7 +439,7 @@ class LocallyConstructedSpline:
             if i == 0:
                 ref_error = res_norm
             else:
-                print(f"Iteration {i - 1} error: {res_norm / ref_error}")
+                print(f"Iteration {i - 1} error: {res_norm / ref_error:.3e}")
 
             rel_norm = res_norm / ref_error
             if rel_norm < rtol:
@@ -459,7 +459,9 @@ class LocallyConstructedSpline:
                 perf_log.end_timing("Assembling problem")
                 perf_log.start_timing("Solving problem")
 
-            sol = ksp_solve_iteratively(jac_mat, res_vec, rtol=rtol)
+            # The solution should be more accurate than residual, perhaps add
+            # adaptive precision (more precision as residual smaller)
+            sol = ksp_solve_iteratively(jac_mat, res_vec, rtol=0.01 * rtol)
             extracted_sol = self.extract_values_to_fe_cps(
                 sol.array_r.reshape(-1, self.dofs_per_cp)
             ).reshape(-1)

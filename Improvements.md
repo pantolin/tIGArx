@@ -57,6 +57,9 @@ practice and research.
   has some weird convergence properties which seem incorrect (converges too quickly or the residual
   is wrong, which was my conclusion after debugging). I do not think it is down to ordering of DOFs
   because extracted orderings are the same as the old implementation. 
+- Optimize the non-linear solver: The method of solution can be less accurate when the relative
+  residual error is small. Usually the assembly is the bottleneck so this does not matter much,
+  but it can improve efficiency for large 3D problems 
 - **More mature abstractions**: This is mostly down to perhaps more rigorously prescribing 
   the interfaces and adding a more explicit way for mapping the parametric domain to the
   physical one. This is arguably done with `AbstractControlMesh`, but perhaps some more 

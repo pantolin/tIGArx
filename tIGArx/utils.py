@@ -161,7 +161,7 @@ def createVectorElementType(degrees, dim, discontinuous, nFields):
         ufl_elem = basix.ufl.element(
             family=scalar_elem.family_name,
             cell=scalar_elem.cell_type,
-            degree=scalar_elem.element.degree,
+            degree=scalar_elem.degree,
             lagrange_variant=scalar_elem.lagrange_variant,
             discontinuous=scalar_elem.discontinuous,
             shape=(nFields,)

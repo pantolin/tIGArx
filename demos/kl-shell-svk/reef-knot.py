@@ -134,13 +134,13 @@ def nodeToDof(node, direction):
 # Potentially-fragile assumption: that there is a correspondence in DoF order
 # between the scalar space used for each component of the control mapping and
 # the mixed space used for the displacement.
-nNodes = spline.cpFuncs[0].vector.local_size
+nNodes = spline.cpFuncs[0].x.petsc_vec.local_size
 nodeX = np.zeros((nNodes, d))
 # FIXME to vectorize
 for i in range(0, nNodes):
-    wi = spline.cpFuncs[d].vector.array_r[i]
+    wi = spline.cpFuncs[d].x.petsc_vec.array_r[i]
     for j in range(0, d):
-        Xj_hom = spline.cpFuncs[j].vector.array_r[i]
+        Xj_hom = spline.cpFuncs[j].x.petsc_vec.array_r[i]
         nodeX[i, j] = Xj_hom / wi
 
 # The contact potential is NOT defined in UFL; contact forces will be computed
@@ -207,7 +207,7 @@ def assembleContact(dispFunc):
     # )
     # F = dolfinx.fem.assemble_vector(
     #     dolfinx.fem.form(0.0 * ufl.TestFunction(spline.V)) * ufl.dx)
-    # Fv = F.vector
+    # Fv = F.x.petsc_vec
 
     F = PETSc.Vec()
     F.create()
@@ -275,8 +275,8 @@ def assembleContact(dispFunc):
             f12 = C * phiPrime(r12) * r12hat
 
             # Nodal FE spline (not quadrature) weights:
-            w1 = spline.cpFuncs[d].vector.array_r[node1]
-            w2 = spline.cpFuncs[d].vector.array_r[node2]
+            w1 = spline.cpFuncs[d].x.petsc_vec.array_r[node1]
+            w2 = spline.cpFuncs[d].x.petsc_vec.array_r[node2]
 
             # Add equal-and-opposite forces to the RHS vector.
             for direction in range(0, d):
@@ -540,7 +540,7 @@ for timeStep in range(0, N_TIME_STEPS):
         dy_hom = dolfinx.fem.Function(spline.V)
         spline.solveLinearSystem(MTKM, MTF, dy_hom)
         # FIXME to do with arrays ?
-        y_hom.vector.axpy(-1.0, dy_hom.vector)
+        y_hom.x.petsc_vec.axpy(-1.0, dy_hom.x.petsc_vec)
 
         if relNorm < REL_TOL:
             break
@@ -550,9 +550,10 @@ for timeStep in range(0, N_TIME_STEPS):
 
     # Move to the next time step.
 
-    ydot_old_hom.vector.array[:] = DELTA_T_inv * \
-        (y_hom.vector.array - y_old_hom.vector.array)
-    y_old_hom.vector.array[:] = y_hom.vector.array
+    ydot_old_hom.x.petsc_vec.array[:] = DELTA_T_inv * (
+        y_hom.x.petsc_vec.array - y_old_hom.x.petsc_vec.array
+    )
+    y_old_hom.x.petsc_vec.array[:] = y_hom.x.petsc_vec.array
     ydot_old_hom.x.scatter_forward()
     y_old_hom.x.scatter_forward()
 

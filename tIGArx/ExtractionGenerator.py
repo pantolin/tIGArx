@@ -273,9 +273,9 @@ class AbstractExtractionGenerator(object):
         for i in range(0, self.nsd + 1):
             # FIXME why computing product for later on setting coordinates manually?
             if FORM_MT:
-                MTC = MT_control * self.cpFuncs[i].vector
+                MTC = MT_control * self.cpFuncs[i].x.petsc_vec
             else:
-                MTC = multTranspose(self.M_control, self.cpFuncs[i].vector)
+                MTC = multTranspose(self.M_control, self.cpFuncs[i].x.petsc_vec)
             for I in np.arange(*MTC.getOwnershipRange()):
                 MTC[I] = self.getHomogeneousCoordinate(I, i)
             MTC.assemble()
@@ -366,7 +366,7 @@ class AbstractExtractionGenerator(object):
         )
         for i in range(0, self.nsd + 1):
             self.generateMesh()
-            viewer.view(self.cpFuncs[i].vector)
+            viewer.view(self.cpFuncs[i].x.petsc_vec)
 
         viewer = PETSc.ViewerHDF5(self.comm).createBinary(
             dirname + "/" + EXTRACTION_MAT_FILE, "w"

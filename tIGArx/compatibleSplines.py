@@ -225,8 +225,8 @@ def iteratedDivFreeSolve(
         du = dolfinx.fem.Function(spline.V)
         # du.assign(Constant(0.0)*du)
         spline.solveLinearSystem(MTAM, MTb, du)
-        # u.vector.assemble()
-        # du.vector.assemble()
+        # u.x.petsc_vec.assemble()
+        # du.x.petsc_vec.assemble()
         u.x.array[:] = u.x.array - du.x.array
         w.x.array[:] = w.x.array + penalty * u.x.array
         # FIXME are these scatter really needed?

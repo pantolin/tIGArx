@@ -227,7 +227,7 @@ class ExtractedSpline(object):
 
         # read extraction matrix and create transpose for control space
         # FIXME to improve
-        Istart, Iend = self.cpFuncs[0].vector.getOwnershipRange()
+        Istart, Iend = self.cpFuncs[0].x.petsc_vec.getOwnershipRange()
         nLocalNodes = Iend - Istart
         self.M_control = PETSc.Mat(self.comm)
         self.M_control.create(self.comm)
@@ -690,7 +690,7 @@ class ExtractedSpline(object):
         PETSc linear solver may be set at ``solver_opts``.
         """
 
-        U = u.vector
+        U = u.x.petsc_vec
         if FORM_MT:
             MTU = self.MT * U
         else:
@@ -866,7 +866,7 @@ class ExtractedSpline(object):
 
         # solve(A,u.vector(),b)
         if lumpMass:
-            u.vector.pointwiseDivide(b.vector, A.vector)
+            u.x.petsc_vec.pointwiseDivide(b.x.petsc_vec, A.x.petsc_vec)
         else:
             comm = V.mesh.comm
             solver = self.createPETScSolver(comm, linsolverOpts)
@@ -882,7 +882,7 @@ class ExtractedSpline(object):
             b.setFromOptions()
 
             # Solve linear system and update ghost values in the solution
-            solver.solve(b, u.vector)
+            solver.solve(b, u.x.petsc_vec)
             u.x.scatter_forward()
 
         return u
@@ -940,10 +940,7 @@ class ExtractedSpline(object):
             rhsVecFE = dolfinx.assemble(rhsForm)
             rhsVec = self.extractVector(rhsVecFE, applyBCs=applyBCs)
             igaDoFs = self.extractVector(dolfinx.fem.Function(self.V).vector())
-            igaDoFs.pointwiseDivide(
-                rhsVec.vector,
-                lhsVec.vector
-            )
+            igaDoFs.pointwiseDivide(rhsVec.x.petsc_vec, lhsVec.x.petsc_vec)
             retval.vector()[:] = self.M * igaDoFs
         if rationalize:
             retval = self.rationalize(retval)

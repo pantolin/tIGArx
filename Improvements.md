@@ -41,7 +41,7 @@ practice and research.
   Right now the performance is not quite at a point where I am happy with it
 - Prevent OMP from going into multithreading mode: the solver and matrix assembly just 
   become slower in many 3D cases because they decide to kick in, even though they are 
-  ill-suited to the tast. Simply exporting `OMP_NUM_THREADS=1` does the job but a more 
+  ill-suited to the task. Simply exporting `OMP_NUM_THREADS=1` does the job but a more 
   permanent solution is welcome
 - **Fix the implementation of B-spline to accommodate periodic boundary conditions**: Right
   now the B-splines just work for open-knot intervals
@@ -87,7 +87,7 @@ practice and research.
 - Try to move the non-linear solver to its own separate function: This will require prescribing
   an abstraction for extracting the solution from the IGA space to FE space.
 - Experiment a bit more with solvers: iterative CG with BJACOBI preconditioner seems to work
-  exceptionally well overall, beating a direct solver. A comparison with pyparadisio is
+  exceptionally well overall, beating a direct solver. A comparison with pypardiso is
   perhaps needed
 - Look a little into the `numpy_perf_test.py` file to see if maybe some benefits can be had
   by not constructing the full extraction matrix. This is tentative, but it might have some
@@ -99,7 +99,7 @@ practice and research.
 - Generalize Lagrange extraction operators to work thorough an interface and have a default
   implementation for full operators (tensor product should be treated as an optimization).
 - Remove ijk2dof or document it better: evil function, it has inconsistencies in the way it
-  numbers degrees of freedom and a somewhat weird way of calculating indices. All The functions
+  numbers degrees of freedom and a somewhat weird way of calculating indices. All the functions
   of this type should either be removed or very clearly documented (their code should be in
   the comment to prevent constant scrolling to check the signature)
 - Add lifting?

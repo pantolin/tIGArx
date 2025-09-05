@@ -190,7 +190,7 @@ res = DENS * ufl.inner(Du_Dt, v) * spline.dx + \
     ufl.inner(sigmaVisc, eps(v)) * spline.dx
 
 # Files for time series of the velocity and mesh distortion:
-vtk = dolfinx.io.VTKXWriter(spline.mesh.comm, "results/u.pvd", "w")
+vtk = dolfinx.io.VTKFile(spline.mesh.comm, "results/u.pvd", "w")
 
 # Time stepping loop:
 for i in range(0, N_STEPS):

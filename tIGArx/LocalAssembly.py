@@ -17,7 +17,7 @@ from tIGArx.utils import interleave_and_expand, get_lagrange_permutation
 # from inside numba JIT-compiled functions
 ffi = FFI()
 
-petsc_lib = dolfinx.fem.petsc.load_petsc_lib(ctypes.cdll.LoadLibrary)
+petsc_lib = ctypes.cdll.LoadLibrary(dolfinx.utils.get_petsc_lib())
 
 # The functions exist in the lib but their signatures are not exposed
 # so we have to define them manually

@@ -207,7 +207,8 @@ def assembly_kernel(
                 perf_log.start_timing(f"Assembling integral {i}")
 
             kernel = getattr(
-                form.ufcx_form.form_integrals[integral],
+                form.ufcx_form.form_integrals[0],
+                # form.ufcx_form.form_integrals[integral],
                 "tabulate_tensor_float64",
             )
             coeffs = all_coeffs[(integral, -1)]

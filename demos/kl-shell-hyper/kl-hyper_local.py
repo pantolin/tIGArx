@@ -282,8 +282,8 @@ def kl_hyper_local():
 
         # Execute nonlinear solve.
         spline.solve_nonlinear_variational_problem(dRes, res, y_hom, bcs, profile=False)
-        for val in y_hom.vector.array:
-            print(f"{val:.15f}", end=", ")
+        # for val in y_hom.x.petsc_vec.array:
+        #     print(f"{val:.15f}", end=", ")
 
         # Advance to next load step.
         stepper.advance()

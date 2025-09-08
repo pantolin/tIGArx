@@ -9,6 +9,7 @@ dependencies:
   - numba
   - gfortran
   - pytest
+  - sphinx
   - pip
   - pip:
       - https://github.com/dalcinl/igakit/archive/refs/heads/master.zip

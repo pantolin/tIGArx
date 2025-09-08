@@ -1,6 +1,20 @@
 # tIGArx
 
-A Python library for isogeometric analysis (IGA) using FEniCS.  The following article outlines the design of tIGArx:
+A Python library for isogeometric analysis (IGA) using FEniCSx. This project is a modern translation and improvement of the original [tIGAr](https://github.com/david-kamensky/tIGAr) library from FEniCS to FEniCSx.
+
+## Key Improvements
+
+tIGArx introduces significant performance and memory optimizations compared to the original tIGAr:
+
+- **Element-wise Bézier extraction**: Instead of global extraction, tIGArx uses element-wise Bézier extraction, which improves performance and reduces memory usage
+- **Modern FEniCSx integration**: Full compatibility with the latest FEniCSx ecosystem
+
+This project is maintained by Pablo Antolin with contributions from Davor Dobrota.
+
+## Original Work
+
+This project builds upon the foundational work by David Kamensky and Yuri Bazilevs:
+
 ```
 @article{Kamensky2019,
 title = "{tIGAr}: Automating isogeometric analysis with {FEniCS}",
@@ -14,12 +28,27 @@ author = "D. Kamensky and Y. Bazilevs"
 }
 ```
 
+## Future Releases
+
+A major release is expected in the coming months, focusing on:
+- **Performance optimization**: Further improvements to computational efficiency
+- **Simplified user interface**: Redesigned API for easier adoption
+- **QUGaR interoperability**: Integration with [QUGaR](https://github.com/pantolin/qugar) for advanced quadrature methods in unfitted geometries
+
 ## Dependencies
-* Any meaningful usage requires [FEniCS](https://fenicsproject.org/) (version 2019.1) and its dependencies.
-* [SciPy](https://www.scipy.org/) is required.  (SciPy is already included in FEniCS Docker distributions.)
-* Usage of the NURBS module requires [igakit](https://github.com/dalcinl/igakit).
-* Compiling the API documentation requires [Sphinx](http://www.sphinx-doc.org/en/master/).
-* The most convenient program for visualizing results is [ParaView](https://www.paraview.org/).
+
+### Core Dependencies
+* [FEniCSx](https://fenicsproject.org/) (version 0.9.0) - Finite element library
+* [MPICH](https://www.mpich.org/) - MPI implementation for parallel computing
+* [SciPy](https://www.scipy.org/) - Scientific computing library
+* [Numba](https://numba.pydata.org/) - JIT compiler for numerical functions
+* [igakit](https://github.com/dalcinl/igakit) - Required for NURBS module usage
+* [gfortran](https://gcc.gnu.org/fortran/) - Fortran compiler (required for building igakit)
+
+### Optional Dependencies
+* [PyVista](https://docs.pyvista.org/) - Recommended for 3D plotting and mesh analysis
+* [ParaView](https://www.paraview.org/) - Recommended for visualizing results
+* [Sphinx](http://www.sphinx-doc.org/en/master/) - Required for building API documentation
 
 ## Installation
 
@@ -58,6 +87,11 @@ Clone the repository and add to `PYTHONPATH`:
 export PYTHONPATH=/path/to/tIGArx:$PYTHONPATH
 ```
 
+### On clusters
+The most convenient way to use FEniCSx likely is via [Spack](https://spack.readthedocs.io/en/latest/). See the [FEniCSx documentation](https://github.com/FEniCS/dolfinx?tab=readme-ov-file#spack) for more details.
+More details on using tIGArx with Spack will be provided soon.
+
+
 ### Documentation
 
 To build the API documentation:
@@ -66,14 +100,3 @@ cd docs
 make html
 ```
 The documentation will be available in `./_build/html/index.html`.  
-
-### On clusters
-The most convenient way to use FEniCS (and therefore tIGArx) on HPC clusters is via [Singularity](https://sylabs.io/singularity/).  A singularity recipe for using tIGArx is in the file `singularity-recipe.def`.  Some additional notes are provided in the comments of that file.  
-
-### Common installation issues
-* `petsc4py.PETSc.Mat object has no attribute PtAP`: This is due to an old version of `petsc4py`.  Try installing the latest version via `pip3`.
-* `ImportError: No module named dolfin`: This occurs when attempting to use `python` rather than `python3`.  FEniCS 2018.1 and newer no longer support Python 2.
-* `Python.h: No such file or directory`: This requires installing the header files for the Python C API.  On Ubuntu, these can be installed via `sudo apt-get install python3-dev`.
-* `ModuleNotFoundError: No module named 'scipy._lib.decorator'`: Try re-installing SciPy, which can be done with the command `pip3 install --force-reinstall scipy`.
-* Errors due to old versions of FEniCS: Run `dolfin-version` in a terminal to check your version of FEniCS.  Note in particular that Ubuntu PPAs for the current stable version of FEniCS are only maintained for the most recent few Ubuntu releases.  Installing via the package manager on an old Ubuntu release may install an older version of FEniCS.
-* `libgfortran.so.3 cannot be found`, or other issues with `libgfortran` when using the Singularity container: Try adding `apt-get -y install libgfortran3` under the `%post` section in the file `singularity-recipe.def`.

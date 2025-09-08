@@ -6,13 +6,13 @@ import ufl
 
 from dolfinx import default_real_type
 
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.common import mpirank
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
-from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.common import mpirank
+from tigarx.timeIntegration import GeneralizedAlphaIntegrator
+from tigarx.RhinoTSplines import RhinoTSplineControlMesh
 
-from tIGArx.timing_util import perf_log
-from tIGArx.utils import interleave_and_expand
+from tigarx.timing_util import perf_log
+from tigarx.utils import interleave_and_expand
 
 
 def dynamic_t_spline_local():

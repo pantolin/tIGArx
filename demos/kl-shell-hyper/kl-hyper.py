@@ -17,14 +17,14 @@ forms.
 import dolfinx
 import ufl
 
-from tIGArx.common import mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.common import mpirank
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
-from tIGArx.calculusUtils import getQuadRuleInterval
-from tIGArx.timeIntegration import LoadStepper
+from tigarx.calculusUtils import getQuadRuleInterval
+from tigarx.timeIntegration import LoadStepper
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
+from tigarx.ExtractedSpline import ExtractedSpline
+from tigarx.MultiFieldSplines import EqualOrderSpline
 
 
 ####### Preprocessing #######

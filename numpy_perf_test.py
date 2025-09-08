@@ -1,7 +1,7 @@
 import numpy as np
 import numba as nb
 
-from tIGArx.timing_util import perf_log
+from tigarx.timing_util import perf_log
 
 
 def numpy_perf_test_matmul():

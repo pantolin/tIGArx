@@ -45,7 +45,7 @@ Documentation = "https://github.com/pantolin/tIGArx#readme"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tIGArx*"]
+include = ["tigarx*"]
 
 [tool.setuptools.package-data]
-tIGArx = ["*.py"]
+tigarx = ["*.py"]

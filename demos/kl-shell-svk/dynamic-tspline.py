@@ -39,12 +39,12 @@ import ufl
 
 from dolfinx import default_real_type
 
-from tIGArx.common import mpirank
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
-from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
+from tigarx.common import mpirank
+from tigarx.timeIntegration import GeneralizedAlphaIntegrator
+from tigarx.RhinoTSplines import RhinoTSplineControlMesh
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
+from tigarx.ExtractedSpline import ExtractedSpline
+from tigarx.MultiFieldSplines import EqualOrderSpline
 
 
 # Check for existence of required data file.

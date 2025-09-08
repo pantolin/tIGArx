@@ -1,6 +1,6 @@
 from mpi4py import MPI
 
-from tIGArx.common import mpirank
+from tigarx.common import mpirank
 
 
 class TimingLogger:

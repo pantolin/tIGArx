@@ -2,11 +2,11 @@ import dolfinx
 import numpy as np
 import ufl
 
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.calculusUtils import getQuadRuleInterval
-from tIGArx.timeIntegration import LoadStepper
-from tIGArx.utils import interleave_and_expand
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.calculusUtils import getQuadRuleInterval
+from tigarx.timeIntegration import LoadStepper
+from tigarx.utils import interleave_and_expand
 
 
 def test_kl_hyper():

@@ -6,11 +6,11 @@ This example uses the simplest IGA discretization, namely, explicit B-splines
 in which parametric and physical space are the same.
 """
 
-from tIGArx.common import mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.common import mpirank
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
+from tigarx.ExtractedSpline import ExtractedSpline
+from tigarx.MultiFieldSplines import EqualOrderSpline
 
 import dolfinx
 import ufl

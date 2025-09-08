@@ -7,7 +7,7 @@ import numba as nb
 
 import dolfinx
 
-from tIGArx.common import worldcomm, DEFAULT_PREALLOC
+from tigarx.common import worldcomm, DEFAULT_PREALLOC
 
 
 # abstract class representing a scalar basis of functions on a manifold for

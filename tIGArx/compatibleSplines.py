@@ -10,12 +10,12 @@ These spline spaces may be used with B-spline or NURBS control meshes to
 define the geometrical mapping from parametric to physical space.
 """
 
-from tIGArx.common import mpirank
-from tIGArx.BSplines import BSpline
-from tIGArx.calculusUtils import cartesianPushforwardRT, cartesianPushforwardN
+from tigarx.common import mpirank
+from tigarx.BSplines import BSpline
+from tigarx.calculusUtils import cartesianPushforwardRT, cartesianPushforwardN
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import AbstractMultiFieldSpline
+from tigarx.ExtractedSpline import ExtractedSpline
+from tigarx.MultiFieldSplines import AbstractMultiFieldSpline
 
 import dolfinx
 import ufl

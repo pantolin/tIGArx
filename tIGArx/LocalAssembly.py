@@ -9,9 +9,9 @@ import dolfinx.fem.petsc
 from cffi import FFI
 from petsc4py import PETSc
 
-from tIGArx.SplineInterface import AbstractScalarBasis
-from tIGArx.timing_util import perf_log
-from tIGArx.utils import interleave_and_expand, get_lagrange_permutation
+from tigarx.SplineInterface import AbstractScalarBasis
+from tigarx.timing_util import perf_log
+from tigarx.utils import interleave_and_expand, get_lagrange_permutation
 
 # Initialization of the FFI interface required to call PETSc functions
 # from inside numba JIT-compiled functions

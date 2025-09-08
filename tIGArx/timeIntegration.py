@@ -6,7 +6,7 @@ methods commonly used in conjunction with IGA, that we found convenient for
 implementing demos.
 """
 
-from tIGArx.calculusUtils import getQuadRule
+from tigarx.calculusUtils import getQuadRule
 
 import dolfinx
 import ufl

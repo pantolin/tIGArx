@@ -34,11 +34,11 @@ import dolfinx
 import ufl
 from mpi4py import MPI
 
-from tIGArx.common import mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.common import mpirank
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
-from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineN
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
+from tigarx.compatibleSplines import BSplineCompat, ExtractedBSplineN
+from tigarx.timeIntegration import GeneralizedAlphaIntegrator
 
 
 ####### Preprocessing #######

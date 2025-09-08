@@ -12,14 +12,14 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.common import mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.solvers import solve_linear_variational_problem, \
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.common import mpirank
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.solvers import solve_linear_variational_problem, \
     dolfinx_assemble_linear_variational_problem
 
-from tIGArx.timing_util import perf_log
-from tIGArx.utils import interleave_and_expand
+from tigarx.timing_util import perf_log
+from tigarx.utils import interleave_and_expand
 
 
 def run_elasticity():

@@ -18,12 +18,12 @@ import dolfinx
 import numpy as np
 import ufl
 
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.calculusUtils import getQuadRuleInterval
-from tIGArx.common import mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.timeIntegration import LoadStepper
-from tIGArx.utils import interleave_and_expand
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.calculusUtils import getQuadRuleInterval
+from tigarx.common import mpirank
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.timeIntegration import LoadStepper
+from tigarx.utils import interleave_and_expand
 
 
 def kl_hyper_local():

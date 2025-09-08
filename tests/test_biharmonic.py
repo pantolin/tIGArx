@@ -5,9 +5,9 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.solvers import solve_linear_variational_problem
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.solvers import solve_linear_variational_problem
 
 
 def test_biharmonic_2d():

@@ -17,11 +17,11 @@ from mpi4py import MPI
 from igakit.nurbs import NURBS as NURBS_ik
 from igakit.io import PetIGA
 
-from tIGArx.common import mpirank, worldcomm
-from tIGArx.NURBS import NURBSControlMesh
+from tigarx.common import mpirank, worldcomm
+from tigarx.NURBS import NURBSControlMesh
 
-from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
+from tigarx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
+from tigarx.timeIntegration import GeneralizedAlphaIntegrator
 
 
 ####### Geometry creation #######

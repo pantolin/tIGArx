@@ -39,11 +39,11 @@ import ufl
 
 from petsc4py import PETSc
 
-from tIGArx.common import mpirank, mpisize
-from tIGArx.RhinoTSplines import RhinoTSplineControlMesh
+from tigarx.common import mpirank, mpisize
+from tigarx.RhinoTSplines import RhinoTSplineControlMesh
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
+from tigarx.ExtractedSpline import ExtractedSpline
+from tigarx.MultiFieldSplines import EqualOrderSpline
 
 
 if mpisize > 1:

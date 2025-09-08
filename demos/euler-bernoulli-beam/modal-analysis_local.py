@@ -16,10 +16,10 @@ from slepc4py import SLEPc
 import ufl
 import dolfinx
 
-from tIGArx.LocalAssembly import assemble_matrix
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.common import mpisize
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.LocalAssembly import assemble_matrix
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.common import mpisize
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
 
 def modal_analysis_local():

@@ -1,7 +1,7 @@
 import numpy as np
 
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.utils import interleave_and_expand, get_csr_pre_allocation
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.utils import interleave_and_expand, get_csr_pre_allocation
 
 
 def reference_dofs_1d(n_u, p, scalar_spline, bs=1):

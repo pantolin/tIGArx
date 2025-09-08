@@ -9,7 +9,7 @@ import ufl
 from dolfinx.fem.petsc import assemble_matrix as petsc_assemble_matrix
 from dolfinx.fem.petsc import assemble_vector as petsc_assemble_vector
 
-from tIGArx.calculusUtils import (
+from tigarx.calculusUtils import (
     getMetric,
     mappedNormal,
     tIGArxMeasure,
@@ -25,7 +25,7 @@ from tIGArx.calculusUtils import (
     curvilinearDiv
 )
 
-from tIGArx.common import (
+from tigarx.common import (
     DEFAULT_DO_PERMUTATION,
     INDEX_TYPE,
     FORM_MT,
@@ -40,8 +40,8 @@ from tIGArx.common import (
     mpirank, DEFAULT_LINSOLVER_REL_TOL, DEFAULT_LINSOLVER_ABS_TOL,
     DEFAULT_LINSOLVER_MAX_ITERS,
 )
-from tIGArx.ExtractionGenerator import AbstractExtractionGenerator
-from tIGArx.utils import createElementType, multTranspose
+from tigarx.ExtractionGenerator import AbstractExtractionGenerator
+from tigarx.utils import createElementType, multTranspose
 
 
 # could represent any sort of spline that is extractable

@@ -15,11 +15,11 @@ from slepc4py import SLEPc
 from dolfinx import default_real_type
 import ufl
 
-from tIGArx.common import mpisize
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.common import mpisize
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
+from tigarx.ExtractedSpline import ExtractedSpline
+from tigarx.MultiFieldSplines import EqualOrderSpline
 
 
 if mpisize > 1:

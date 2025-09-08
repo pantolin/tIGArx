@@ -17,8 +17,8 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.BSplines import AbstractScalarBasis, AbstractControlMesh, worldcomm
-from tIGArx.utils import interleave_and_expand, get_csr_pre_allocation
+from tigarx.BSplines import AbstractScalarBasis, AbstractControlMesh, worldcomm
+from tigarx.utils import interleave_and_expand, get_csr_pre_allocation
 from dolfinx import default_real_type
 
 # important case of output from Rhino T-splines plugin: bi-variate cubic

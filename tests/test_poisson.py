@@ -7,10 +7,10 @@ from mpi4py import MPI
 
 from igakit.nurbs import NURBS as NURBS_ik
 
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.NURBS import NURBSControlMesh
-from tIGArx.solvers import solve_linear_variational_problem
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.NURBS import NURBSControlMesh
+from tigarx.solvers import solve_linear_variational_problem
 
 
 def test_bspline_poisson_2d():

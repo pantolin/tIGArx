@@ -1,6 +1,6 @@
 import numpy as np
 
-from tIGArx.BSplines import compute_local_bezier_extraction_operators, uniform_knots, \
+from tigarx.BSplines import compute_local_bezier_extraction_operators, uniform_knots, \
     BSpline1
 
 

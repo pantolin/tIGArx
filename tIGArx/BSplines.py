@@ -14,9 +14,9 @@ import numba as nb
 import dolfinx
 from dolfinx import default_real_type
 
-from tIGArx.common import INDEX_TYPE, worldcomm
-from tIGArx.SplineInterface import AbstractScalarBasis, AbstractControlMesh
-from tIGArx.utils import interleave_and_expand, interleave_and_expand_numba
+from tigarx.common import INDEX_TYPE, worldcomm
+from tigarx.SplineInterface import AbstractScalarBasis, AbstractControlMesh
+from tigarx.utils import interleave_and_expand, interleave_and_expand_numba
 
 
 def uniform_knots(p, start, end, n_elem, periodic=False, continuity_drop=0):

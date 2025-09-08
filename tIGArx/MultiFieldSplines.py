@@ -2,7 +2,7 @@ import abc
 
 import numpy as np
 
-from tIGArx.CoordChartSpline import AbstractCoordinateChartSpline
+from tigarx.CoordChartSpline import AbstractCoordinateChartSpline
 
 
 class AbstractMultiFieldSpline(AbstractCoordinateChartSpline):

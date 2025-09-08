@@ -5,8 +5,8 @@ import scipy as sp
 
 from petsc4py import PETSc
 
-from tIGArx.ExtractionGenerator import AbstractExtractionGenerator
-from tIGArx.common import INDEX_TYPE
+from tigarx.ExtractionGenerator import AbstractExtractionGenerator
+from tigarx.common import INDEX_TYPE
 
 
 class AbstractCoordinateChartSpline(AbstractExtractionGenerator):

@@ -57,10 +57,10 @@ A major release is expected in the coming months, focusing on:
 1. **Install dependencies with conda:**
    ```bash
    conda env create -f environment.yml
-   conda activate tIGArx
+   conda activate tigarx
    ```
 
-2. **Install tIGArx:**
+2. **Install tigarx:**
    ```bash
    pip install git+https://github.com/pantolin/tIGArx.git
    ```
@@ -111,11 +111,11 @@ For a containerized environment with all dependencies pre-installed:
 The Docker image includes:
 - FEniCSx v0.9.0r1
 - All required dependencies (scipy, numba, gfortran, pytest, sphinx, igakit)
-- tIGArx installed in development mode
+- tigarx installed in development mode
 
 ### On clusters
 The most convenient way to use FEniCSx likely is via [Spack](https://spack.readthedocs.io/en/latest/). See the [FEniCSx documentation](https://github.com/FEniCS/dolfinx?tab=readme-ov-file#spack) for more details.
-More details on using tIGArx with Spack will be provided soon.
+More details on using tigarx with Spack will be provided soon.
 
 
 ### Documentation

@@ -1,1 +1,1 @@
-from tIGArx import common
+from tigarx import common

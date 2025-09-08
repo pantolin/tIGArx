@@ -1,8 +1,8 @@
 import numpy as np
 
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.MultiFieldSplines import EqualOrderSpline
 
 
 def test_control_points_2d():

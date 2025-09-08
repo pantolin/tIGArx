@@ -6,9 +6,9 @@ from slepc4py import SLEPc
 import ufl
 import dolfinx
 
-from tIGArx.LocalAssembly import assemble_matrix
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.LocalAssembly import assemble_matrix
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
 
 
 def test_modal_analysis_1d():

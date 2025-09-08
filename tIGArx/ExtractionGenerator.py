@@ -6,7 +6,7 @@ import numpy as np
 import dolfinx
 from petsc4py import PETSc
 
-from tIGArx.common import (
+from tigarx.common import (
     selfcomm,
     worldcomm,
     USE_DG_DEFAULT,
@@ -16,7 +16,7 @@ from tIGArx.common import (
     INDEX_TYPE,
     DEFAULT_DO_PERMUTATION
 )
-from tIGArx.utils import (
+from tigarx.utils import (
     createElementType,
     createVectorElementType,
     generateIdentityPermutation,

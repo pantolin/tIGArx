@@ -5,9 +5,9 @@ import dolfinx
 import ufl
 from petsc4py import PETSc
 
-from tIGArx.LocalAssembly import assemble_matrix, assemble_vector
-from tIGArx.SplineInterface import AbstractScalarBasis
-from tIGArx.timing_util import perf_log
+from tigarx.LocalAssembly import assemble_matrix, assemble_vector
+from tigarx.SplineInterface import AbstractScalarBasis
+from tigarx.timing_util import perf_log
 
 
 import platform

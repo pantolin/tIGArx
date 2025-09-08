@@ -6,7 +6,7 @@ import basix
 import basix.ufl
 import petsc4py.PETSc as PETSc
 
-from tIGArx.common import worldcomm, INDEX_TYPE, mpisize, mpirank
+from tigarx.common import worldcomm, INDEX_TYPE, mpisize, mpirank
 
 
 def generateMeshXMLFileName(comm):

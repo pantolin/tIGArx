@@ -12,11 +12,11 @@ from mpi4py import MPI
 from igakit.nurbs import NURBS as NURBS_ik
 from igakit.io import PetIGA
 
-from tIGArx.common import mpirank, worldcomm
-from tIGArx.NURBS import NURBSControlMesh
+from tigarx.common import mpirank, worldcomm
+from tigarx.NURBS import NURBSControlMesh
 
-from tIGArx.ExtractedSpline import ExtractedSpline
-from tIGArx.MultiFieldSplines import EqualOrderSpline
+from tigarx.ExtractedSpline import ExtractedSpline
+from tigarx.MultiFieldSplines import EqualOrderSpline
 
 
 # Number of levels of refinement with which to run the Poisson problem.

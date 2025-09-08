@@ -16,10 +16,10 @@ import ufl
 
 from mpi4py import MPI
 
-from tIGArx.common import mpirank
-from tIGArx.BSplines import ExplicitBSplineControlMesh, uniform_knots
-from tIGArx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
-from tIGArx.timeIntegration import GeneralizedAlphaIntegrator
+from tigarx.common import mpirank
+from tigarx.BSplines import ExplicitBSplineControlMesh, uniform_knots
+from tigarx.compatibleSplines import BSplineCompat, ExtractedBSplineRT
+from tigarx.timeIntegration import GeneralizedAlphaIntegrator
 
 
 ####### Preprocessing #######

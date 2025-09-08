@@ -5,20 +5,20 @@ import ufl
 
 from petsc4py import PETSc
 
-from tIGArx.LocalAssembly import _extract_control_points, assemble_vector, \
+from tigarx.LocalAssembly import _extract_control_points, assemble_vector, \
     assemble_matrix
-from tIGArx.SplineInterface import AbstractControlMesh
+from tigarx.SplineInterface import AbstractControlMesh
 
-from tIGArx.calculusUtils import getMetric, mappedNormal, tIGArxMeasure, volumeJacobian, \
+from tigarx.calculusUtils import getMetric, mappedNormal, tIGArxMeasure, volumeJacobian, \
     surfaceJacobian, pinvD, getChristoffel, cartesianGrad, cartesianDiv, cartesianCurl, \
     CurvilinearTensor, curvilinearGrad, curvilinearDiv
 
-from tIGArx.common import selfcomm
-from tIGArx.solvers import solve_linear_variational_problem, ksp_solve_iteratively, \
+from tigarx.common import selfcomm
+from tigarx.solvers import solve_linear_variational_problem, ksp_solve_iteratively, \
     apply_bcs, options
 
-from tIGArx.timing_util import perf_log
-from tIGArx.utils import createElementType, createVectorElementType, create_permuted_element, get_lagrange_permutation
+from tigarx.timing_util import perf_log
+from tigarx.utils import createElementType, createVectorElementType, create_permuted_element, get_lagrange_permutation
 
 
 class LocallyConstructedSpline:

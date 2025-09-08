@@ -9,8 +9,8 @@ import numpy as np
 from igakit.io import PetIGA
 from igakit.nurbs import NURBS as NURBS_ik
 
-from tIGArx.BSplines import BSpline, ij2dof, ijk2dof
-from tIGArx.SplineInterface import AbstractControlMesh
+from tigarx.BSplines import BSpline, ij2dof, ijk2dof
+from tigarx.SplineInterface import AbstractControlMesh
 
 
 class NURBSControlMesh(AbstractControlMesh):

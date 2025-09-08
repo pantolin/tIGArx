@@ -6,13 +6,13 @@ from mpi4py import MPI
 
 from igakit.nurbs import NURBS as NURBS_ik
 
-from tIGArx.LocalSpline import LocallyConstructedSpline
-from tIGArx.common import mpirank
-from tIGArx.NURBS import NURBSControlMesh
+from tigarx.LocalSpline import LocallyConstructedSpline
+from tigarx.common import mpirank
+from tigarx.NURBS import NURBSControlMesh
 
-from tIGArx.solvers import solve_linear_variational_problem, \
+from tigarx.solvers import solve_linear_variational_problem, \
     dolfinx_assemble_linear_variational_problem
-from tIGArx.timing_util import perf_log
+from tigarx.timing_util import perf_log
 
 
 def local_poisson_nurbs_2d():

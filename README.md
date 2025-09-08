@@ -120,7 +120,7 @@ More details on using tIGArx with Spack will be provided soon.
 
 ### Documentation
 
-To build the API documentation:
+To build the (_under construction_) API documentation:
 ```bash
 cd docs
 make html

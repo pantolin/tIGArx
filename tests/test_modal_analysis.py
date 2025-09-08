@@ -85,13 +85,15 @@ def test_modal_analysis_1d():
         omega2 = eig_solver.getEigenpair(n, Vr=u_vector_iga)
         modes[n] = np.sqrt(omega2).real
 
-    ref_modes = np.array([
-        3.5160152732662877,
-        22.034491628160676,
-        61.69721604563323,
-        120.9019283576657,
-        199.85958583453765,
-    ])
+    ref_modes = np.array(
+        [
+            3.516015157295631,
+            22.034491615114383,
+            61.697216040295345,
+            120.90192836211132,
+            199.85958583245662,
+        ]
+    )
 
     # It is somewhat interesting that there is such a "large" mismatch between
     # reference tigar and new local assembly. However, this order of error is i

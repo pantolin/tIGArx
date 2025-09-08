@@ -40,10 +40,8 @@ from tIGArx.common import (
     mpirank, DEFAULT_LINSOLVER_REL_TOL, DEFAULT_LINSOLVER_ABS_TOL,
     DEFAULT_LINSOLVER_MAX_ITERS,
 )
-
 from tIGArx.ExtractionGenerator import AbstractExtractionGenerator
-from tIGArx.utils import createElementType, createFunctionSpace, \
-    createVectorElementType, multTranspose
+from tIGArx.utils import createElementType, multTranspose
 
 
 # could represent any sort of spline that is extractable
@@ -207,11 +205,9 @@ class ExtractedSpline(object):
         discontinuous = self.elementType == "DG"
 
         self.VE_control = createElementType(self.p_control, dim, discontinuous)
-        self.V_control = createFunctionSpace(self.mes, self.VE_control)
+        self.V_control = dolfinx.fem.functionspace(self.mes, self.VE_control)
 
-        self.VE = createVectorElementType(
-            self.p, dim, discontinuous, self.nFields)
-        self.V = createFunctionSpace(self.mesh, self.VE)
+        self.V = dolfinx.fem.functionspace(self.mesh, self.VE)
 
         # read control functions
         viewer = PETSc.ViewerHDF5(self.comm).createBinary(

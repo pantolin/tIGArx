@@ -19,7 +19,8 @@ from tIGArx.common import (
 from tIGArx.utils import (
     createElementType,
     createVectorElementType,
-    generateIdentityPermutation, createFunctionSpace, multTranspose
+    generateIdentityPermutation,
+    multTranspose,
 )
 
 
@@ -251,12 +252,12 @@ class AbstractExtractionGenerator(object):
         self.nsd = self.getNsd()
 
         self.VE_control = self.createElementType(self.getDegree(-1))
-        self.V_control = createFunctionSpace(self.mesh, self.VE_control)
+        self.V_control = dolfinx.fem.functionspace(self.mesh, self.VE_control)
 
         nFields = self.getNFields()
         degrees = [self.getDegree(i) for i in range(nFields)]
         self.VE = self.createVectorElementType(degrees, nFields)
-        self.V = createFunctionSpace(self.mesh, self.VE)
+        self.V = dolfinx.fem.functionspace(self.mesh, self.VE)
 
         self.cpFuncs = [dolfinx.fem.Function(
             self.V_control) for _ in range(self.nsd + 1)]

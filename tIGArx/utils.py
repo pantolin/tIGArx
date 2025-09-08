@@ -167,33 +167,10 @@ def createVectorElementType(degrees, dim, discontinuous, nFields):
             shape=(nFields,)
         )
     else:
-        if not isDolfinxVersion8orHigher() and mpisize > 1:
-            raise Exception("Currently, due to a dolfinx bug in versions < 0.8.0, "
-                            "it is not possible to use mixed element in parallel. "
-                            "See https://fenicsproject.discourse.group/t/degrees-of-freedom-of-sub-spaces-in-parallel/14351")
-
-        scalar_elems = [createElementType(
-            deg, dim, discontinuous) for deg in degrees]
+        scalar_elems = [createElementType(deg, dim, discontinuous) for deg in degrees]
         ufl_elem = basix.ufl.mixed_element(scalar_elems)
 
     return ufl_elem
-
-
-def isDolfinxVersion8orHigher():
-    """ FIXME to document
-    """
-    from packaging.version import Version
-    return Version(dolfinx.__version__) >= Version("0.8.0")
-
-
-def createFunctionSpace(mesh, ufl_elem):
-    """ FIXME to document
-    """
-    if isDolfinxVersion8orHigher():
-        V = dolfinx.fem.functionspace(mesh, ufl_elem)
-    else:
-        V = dolfinx.fem.FunctionSpace(mesh, ufl_elem)
-    return V
 
 
 def interleave_and_expand(arr: np.ndarray, n: int) -> np.ndarray:

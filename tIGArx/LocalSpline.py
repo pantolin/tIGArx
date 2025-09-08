@@ -18,8 +18,7 @@ from tIGArx.solvers import solve_linear_variational_problem, ksp_solve_iterative
     apply_bcs, options
 
 from tIGArx.timing_util import perf_log
-from tIGArx.utils import createFunctionSpace, get_lagrange_permutation, \
-    createElementType, createVectorElementType, create_permuted_element
+from tIGArx.utils import createElementType, createVectorElementType, create_permuted_element, get_lagrange_permutation
 
 
 class LocallyConstructedSpline:
@@ -55,7 +54,7 @@ class LocallyConstructedSpline:
         #     dofs_per_cp=1,
         #     discontinuous=False
         # )
-        self.control_space = createFunctionSpace(self.mesh, self.control_element)
+        self.control_space = dolfinx.fem.functionspace(self.mesh, self.control_element)
 
         self.control_point_funcs = [
             dolfinx.fem.Function(self.control_space) for _ in range(self.space_dim + 1)
@@ -73,7 +72,7 @@ class LocallyConstructedSpline:
         #     self.dofs_per_cp,
         #     discontinuous=False
         # )
-        self.V = createFunctionSpace(self.mesh, self.space_element)
+        self.V = dolfinx.fem.functionspace(self.mesh, self.space_element)
 
         self.control_points: np.ndarray | None = None
         self.extracted_control_points: np.ndarray | None = None

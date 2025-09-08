@@ -87,6 +87,32 @@ Clone the repository and add to `PYTHONPATH`:
 export PYTHONPATH=/path/to/tIGArx:$PYTHONPATH
 ```
 
+### Docker Installation
+
+For a containerized environment with all dependencies pre-installed:
+
+1. **Build the Docker image:**
+   ```bash
+   docker build -f docker/Dockerfile -t tigarx .
+   ```
+
+2. **Run the container:**
+   ```bash
+   # Interactive shell
+   docker run -it tigarx
+   
+   # With volume mount for development
+   docker run -it -v $(pwd):/app tigarx
+   
+   # Run a specific script
+   docker run -v $(pwd):/app tigarx python demos/poisson/poisson.py
+   ```
+
+The Docker image includes:
+- FEniCSx v0.9.0r1
+- All required dependencies (scipy, numba, gfortran, pytest, sphinx, igakit)
+- tIGArx installed in development mode
+
 ### On clusters
 The most convenient way to use FEniCSx likely is via [Spack](https://spack.readthedocs.io/en/latest/). See the [FEniCSx documentation](https://github.com/FEniCS/dolfinx?tab=readme-ov-file#spack) for more details.
 More details on using tIGArx with Spack will be provided soon.

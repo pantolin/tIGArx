@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tigarx"
+version = "2024.1"
+description = "Isogeometric analysis with FEniCS"
+readme = "README.md"
+license = { text = "GNU LGPLv3" }
+authors = [{ name = "P. Antolin, D. Dobrota, D. Kamensky" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+keywords = [
+    "isogeometric analysis",
+    "finite elements",
+    "FEniCS",
+    "B-splines",
+    "NURBS",
+]
+requires-python = ">=3.8"
+dependencies = ["scipy", "numba", "pyvista"]
+
+[project.optional-dependencies]
+dev = ["pytest", "sphinx"]
+full = ["fenics-dolfinx==0.9.0", "mpich", "gfortran"]
+
+[project.urls]
+Homepage = "https://github.com/pantolin/tIGArx"
+Repository = "https://github.com/pantolin/tIGArx"
+Documentation = "https://github.com/pantolin/tIGArx#readme"
+"Bug Tracker" = "https://github.com/pantolin/tIGArx/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tIGArx*"]
+
+[tool.setuptools.package-data]
+tIGArx = ["*.py"]

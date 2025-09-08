@@ -23,11 +23,49 @@ author = "D. Kamensky and Y. Bazilevs"
 
 ## Installation
 
-Install all dependencies, clone the repository (or download and extract from an archive), and append the top-level directory of the repository (viz. the one with subdirectories `tIGArx`, `docs`, etc.) to the environment variable `PYTHONPATH`, e.g., by adding
+### Quick Install (Recommended)
+
+1. **Install dependencies with conda:**
+   ```bash
+   conda env create -f environment.yml
+   conda activate tIGArx
+   ```
+
+2. **Install tIGArx:**
+   ```bash
+   pip install git+https://github.com/pantolin/tIGArx.git
+   ```
+
+### Alternative Installation Methods
+
+**From local source:**
 ```bash
-export PYTHONPATH=/path/to/repository/:$PYTHONPATH
+git clone https://github.com/pantolin/tIGArx.git
+cd tIGArx
+pip install -e .
 ```
-to your `~/.bashrc` file (and `source`-ing it).  To (optionally) build the API documentation, change directory to `docs` and type `make html`. The main documentation will then be in `./_build/html/index.html`, which can be opened with a web browser.  
+
+**Development installation:**
+```bash
+git clone https://github.com/pantolin/tIGArx.git
+cd tIGArx
+pip install -e ".[dev]"
+```
+
+**Manual installation (legacy method):**
+Clone the repository and add to `PYTHONPATH`:
+```bash
+export PYTHONPATH=/path/to/tIGArx:$PYTHONPATH
+```
+
+### Documentation
+
+To build the API documentation:
+```bash
+cd docs
+make html
+```
+The documentation will be available in `./_build/html/index.html`.  
 
 ### On clusters
 The most convenient way to use FEniCS (and therefore tIGArx) on HPC clusters is via [Singularity](https://sylabs.io/singularity/).  A singularity recipe for using tIGArx is in the file `singularity-recipe.def`.  Some additional notes are provided in the comments of that file.  

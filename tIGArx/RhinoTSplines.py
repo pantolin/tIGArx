@@ -79,15 +79,18 @@ def RhinoTSplineScalarBasisFuncs(xi, C):
 
 
 def identity_partitioner(
-    comm: MPI.Comm, nparts: int, dim: int, cells: dolfinx.cpp.graph.AdjacencyList_int64
+    comm: MPI.Comm,
+    nparts: int,
+    cell_types: list[int],
+    topo: dolfinx.cpp.graph.AdjacencyList_int64,
 ) -> dolfinx.cpp.graph.AdjacencyList_int32:
     """(Dummy) mesh partitioner for leaving cells on the current rank.
 
     Args:
         comm: Mesh's MPI communicator
-        nparts: Number of part in which the mesh will be partitioned.
-        dim: Parametric dimension of the mesh.
-        cells: List of cells to distribute.
+        nparts: Number of parts in which the mesh will be partitioned.
+        cell_types: Cell types of the mesh.
+        topo: Topology to distribute.
 
     Returns:
         rank_dest: Adjaceny list assigning to every cell in the list cells,
@@ -95,7 +98,11 @@ def identity_partitioner(
         In this case, the destination rank will be the current one.
     """
 
-    rank_dest = np.full(cells.num_nodes, comm.rank, dtype=np.int32)
+    assert len(cell_types) == len(topo)
+    assert len(topo) == 1, "Not implemented for multiple groups of cells."
+
+    n_cells = len(topo[0]) // dolfinx.cpp.mesh.cell_num_vertices(cell_types[0])
+    rank_dest = np.full(n_cells, comm.rank, dtype=np.int32)
     rank_dest = dolfinx.cpp.graph.AdjacencyList_int32(rank_dest)
     return rank_dest
 

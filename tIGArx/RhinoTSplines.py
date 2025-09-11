@@ -177,7 +177,10 @@ class RhinoTSplineScalarBasis(AbstractScalarBasis):
         return False
 
     def needsDG(self):
-        return False
+        # Even if using discontinuous meshes, somehow dolfinx detects coincident
+        # nodes and creates continuous spaces by default.
+        # In this way we force the use of DG elements.
+        return True
 
     def getNodesAndEvals(self, xi):
         elementIndex = int(xi[0] / 3.0 + 0.1)

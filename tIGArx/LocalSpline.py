@@ -43,16 +43,18 @@ class LocallyConstructedSpline:
         self.mesh: dolfinx.mesh.Mesh = mesh.getScalarSpline().generateMesh()
         self.space_dim = mesh.getNsd()
 
+        needs_dg = self.spline_mesh.getScalarSpline().needsDG()
+
         self.control_element = createElementType(
             self.spline_mesh.getScalarSpline().getDegree(),
             self.mesh.geometry.dim,
-            discontinuous=False
+            discontinuous=needs_dg,
         )
         # self.control_element = create_permuted_element(
         #     self.spline_mesh.getScalarSpline().getDegree(),
         #     self.space_dim,
         #     dofs_per_cp=1,
-        #     discontinuous=False
+        #     discontinuous=needs_dg
         # )
         self.control_space = dolfinx.fem.functionspace(self.mesh, self.control_element)
 
@@ -63,14 +65,14 @@ class LocallyConstructedSpline:
         self.space_element = createVectorElementType(
             [self.spline_mesh.getScalarSpline().getDegree()] * self.dofs_per_cp,
             self.mesh.geometry.dim,
-            discontinuous=False,
-            nFields=self.dofs_per_cp
+            discontinuous=needs_dg,
+            nFields=self.dofs_per_cp,
         )
         # self.space_element = create_permuted_element(
         #     self.spline_mesh.getScalarSpline().getDegree(),
         #     self.space_dim,
         #     self.dofs_per_cp,
-        #     discontinuous=False
+        #     discontinuous=needs_dg
         # )
         self.V = dolfinx.fem.functionspace(self.mesh, self.space_element)
 

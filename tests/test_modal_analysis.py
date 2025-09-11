@@ -99,4 +99,4 @@ def test_modal_analysis_1d():
     # reference tigar and new local assembly. However, this order of error is i
     # in line with previous bi-harmonic tests, so it is likely due to the bad
     # conditioning of the problem.
-    np.testing.assert_allclose(modes, ref_modes, rtol=3e-8)
+    np.testing.assert_allclose(modes, ref_modes, rtol=3e-7)

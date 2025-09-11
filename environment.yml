@@ -1,4 +1,4 @@
-name: tIGArx
+name: tigarx 
 channels:
   - conda-forge
 dependencies:

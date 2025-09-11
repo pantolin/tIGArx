@@ -137,6 +137,7 @@ class LocallyConstructedSpline:
         """
         tag = 0
         face_dim = self.mesh.topology.dim - 1
+        self.mesh.topology.create_entities(face_dim)
         all_facets = np.arange(*self.mesh.topology.index_map(face_dim).local_range)
 
         self.boundary_markers = dolfinx.mesh.meshtags(

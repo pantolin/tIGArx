@@ -1,4 +1,4 @@
-# tIGArx
+# tIGArx v0.1.0
 
 A Python library for isogeometric analysis (IGA) using FEniCSx. This project is a modern translation and improvement of the original [tIGAr](https://github.com/david-kamensky/tIGAr) library from FEniCS to FEniCSx.
 

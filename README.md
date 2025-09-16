@@ -38,7 +38,7 @@ A major release is expected in the coming months, focusing on:
 ## Dependencies
 
 ### Core Dependencies
-* [FEniCSx](https://fenicsproject.org/) (version 0.9.0) - Finite element library
+* [FEniCSx](https://fenicsproject.org/) (version v0.9.0) - Finite element library
 * [MPICH](https://www.mpich.org/) - MPI implementation for parallel computing
 * [SciPy](https://www.scipy.org/) - Scientific computing library
 * [Numba](https://numba.pydata.org/) - JIT compiler for numerical functions

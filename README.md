@@ -62,7 +62,7 @@ A major release is expected in the coming months, focusing on:
 
 2. **Install tigarx:**
    ```bash
-   pip install git+https://github.com/pantolin/tIGArx.git
+   pip install git+https://github.com/pantolin/tIGArx.git@v0.1.0
    ```
 
 ### Alternative Installation Methods
